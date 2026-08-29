@@ -561,6 +561,14 @@ input[type=range]::-webkit-slider-thumb{
   </div>
 </div>
 
+<div id="dailyTargetRow" style="display:flex;align-items:center;gap:8px;padding:4px 14px;background:var(--bg2,#0b0f14)">
+  <span style="font-size:8px;letter-spacing:.08em;color:var(--text3);white-space:nowrap">DAILY TARGET</span>
+  <div style="flex:1;height:3px;background:var(--border2);border-radius:2px;overflow:hidden">
+    <div id="dailyTargetFill" style="height:100%;width:0%;border-radius:2px;background:linear-gradient(90deg,var(--green),var(--gold));transition:width .3s"></div>
+  </div>
+  <span id="dailyTargetLabel" style="font-size:9px;color:var(--text3);white-space:nowrap">—</span>
+</div>
+
 <div class="safety-band" style="height:28px;gap:12px;padding:0 14px;overflow-x:auto;overflow-y:hidden;white-space:nowrap;font-size:9.5px;">
   <span class="sb-dot" id="sbDot" style="flex-shrink:0"></span>
   <div class="sb-item"><span>Floor</span>&nbsp;<span class="sb-val" id="sbFloor">—</span></div>
@@ -4942,6 +4950,7 @@ function updateStatsStrip() {
     wrEl.textContent = '—'; wrEl.className = 'stat-val';
   }
   updateTargetBar();
+  updateDailyTargetBar();
   updateSafetyUI();
 }
 
@@ -5992,6 +6001,37 @@ function updateTargetBar() {
   $('targetBarLabel').textContent = `$${target}`;
 }
 
+// ── SMALL LIVE DAILY-TARGET PROGRESS BAR (below the account panels) ──
+// Unlike updateTargetBar() above (which tracks total session gain vs
+// target), this tracks progress against the actual DAILY lock baseline —
+// the same baseline checkProfitLock() resets every calendar day (or, during
+// a backtest, that the replay engine resets every simulated day). So this
+// bar fills 0→100% each day and snaps back to 0% the moment a day rolls
+// over or a lock fires, instead of just climbing for the whole session.
+function updateDailyTargetBar() {
+  const fillEl = $('dailyTargetFill');
+  const lblEl  = $('dailyTargetLabel');
+  if (!fillEl || !lblEl) return;
+
+  const inReplay = typeof replay !== 'undefined' && replay.active;
+  const target   = inReplay ? replay.replayProfitTarget : CFG.PROFIT_TARGET;
+
+  if (!target || target <= 0) {
+    fillEl.style.width = '0%';
+    lblEl.textContent = '—';
+    return;
+  }
+
+  const bal      = inReplay ? replay.replayBal          : demoBalance;
+  const baseline = inReplay ? replay.replayProfitBaseline : (profitLockBaseline || demoStartBal || bal);
+  const hitsToday = inReplay ? (replay.replayProfitHitsToday || 0) : (profitLockHits || 0);
+
+  const progress = Math.max(0, bal - baseline);
+  const pct = Math.max(0, Math.min(100, (progress / target) * 100));
+  fillEl.style.width = pct.toFixed(1) + '%';
+  lblEl.textContent = `$${progress.toFixed(0)} / $${target}${hitsToday > 0 ? ` · ${hitsToday}× today` : ''}`;
+}
+
 $('cfgRiskPct').addEventListener('input', e=>{ $('riskDisplay').textContent = parseFloat(e.target.value).toFixed(1)+'%'; });
 $('cfgWinRate').addEventListener('input', e=>{ $('winRateDisplay').textContent = parseInt(e.target.value)+'%'; });
 $('cfgMaxDD').addEventListener('input', e=>{ $('ddDisplay').textContent = parseFloat(e.target.value).toFixed(1)+'%'; });
@@ -6632,7 +6672,9 @@ const replay = {
     this.replayLastSigEpoch = 0; this.replayPosIdCounter = 0;
     this.replayProfitTarget = profitTarget;
     this.replayProfitBaseline = startBal;
+    this.replayProfitDay = null;
     this.replayProfitHits = 0;
+    this.replayProfitHitsToday = 0;
     this._enterReplayMode();
     this._tick();
     this._scheduleNext();
@@ -6689,20 +6731,6 @@ const replay = {
     this._processCandle(true);
     this.index++;
 
-    // ── Profit target: tracked for stats/UI only, never halts trading. ──
-    // Mirrors live checkProfitLock() — every time the balance climbs another
-    // full target-sized increment above the last baseline, log a "hit" and
-    // move the baseline forward, so the bot keeps compounding and can hit
-    // the target repeatedly across the run instead of stopping at the first hit.
-    if (this.replayProfitTarget > 0) {
-      while (this.replayBal - this.replayProfitBaseline >= this.replayProfitTarget) {
-        this.replayProfitHits++;
-        this.replayProfitBaseline += this.replayProfitTarget;
-        addSignal('info',
-          `[BT] Profit target #${this.replayProfitHits} ($${this.replayProfitTarget.toFixed(2)}) reached — continuing to trade`, null);
-      }
-    }
-
     const pct = ((this.index - 100) / (this.data.length - 100)) * 100;
     const spd = `${this.speed}×`;
     setBtProgress(Math.min(99, 40 + pct * 0.57),
@@ -6751,6 +6779,32 @@ const replay = {
     candles[900] = completedM15;
     mid = current.open;  // start at bar open for trailing-stop high-water seed
     this._checkReplayPositions(current);
+
+    // ── DAILY PROFIT TARGET LOCK — resets every simulated calendar day ────
+    // Mirrors live checkProfitLock(): the target is measured against a
+    // baseline that resets to the current balance at the start of each new
+    // day (using the historical candle's own date, not wall-clock time,
+    // since backtests replay past dates). Every time the balance climbs a
+    // full target-sized increment above that day's baseline, it's logged as
+    // a lock/hit and the baseline steps forward — the bot is NEVER stopped
+    // by this, it just keeps compounding and can hit the target multiple
+    // times in a single day.
+    if (this.replayProfitTarget > 0) {
+      const dayKey = Math.floor(currentEpoch / 86400);
+      if (this.replayProfitDay !== dayKey) {
+        this.replayProfitDay = dayKey;
+        this.replayProfitBaseline = this.replayBal;
+        this.replayProfitHitsToday = 0;
+      }
+      while (this.replayBal - this.replayProfitBaseline >= this.replayProfitTarget) {
+        this.replayProfitHitsToday++;
+        this.replayProfitHits++;
+        this.replayProfitBaseline += this.replayProfitTarget;
+        addSignal('info',
+          `[BT] Daily profit target #${this.replayProfitHitsToday} ($${this.replayProfitTarget.toFixed(2)}) reached — locked, continuing to trade`, null);
+      }
+      updateDailyTargetBar();
+    }
 
     // ── STEP 2: Entry evaluation — tick-accurate, no future data ──────────
     if (!this.positions.length && !isNaN(this.replayBal) && this.replayBal > this.replayHardFloor) {
@@ -7206,6 +7260,7 @@ const replay = {
       equity: this._buildEquityCurve(),
       days: btSelectedDays, candles: this.data.length,
       profitTarget: this.replayProfitTarget,
+      profitTargetHits: this.replayProfitHits || 0,
       // ── Extended run summary ──
       runTimestamp: Date.now(),
       pnlTotal: +pnlTotal.toFixed(2),
@@ -7604,8 +7659,9 @@ function renderBtResults(r) {
   const pfNum = r.trades.filter(t => t.pnl > 0).reduce((s,t) => s + t.pnl, 0);
   const pfDen = r.trades.filter(t => t.pnl < 0).reduce((s,t) => s + Math.abs(t.pnl), 0);
   const pf = pfDen > 0 ? (pfNum / pfDen).toFixed(2) : '∞';
-  const tgtPct = r.profitTarget > 0 ? Math.min(100, (Math.max(0, pnl) / r.profitTarget) * 100) : 0;
-  const tgtHit = pnl >= r.profitTarget;
+  const days = r.days > 0 ? r.days : 1;
+  const hits = r.profitTargetHits ?? 0;
+  const avgHitsPerDay = r.profitTarget > 0 ? (hits / days) : 0;
   // ── Extended stats (may come from run summary or be computed from trade log) ──
   const tpCount    = r.tpCount    ?? r.trades.filter(t => t.reason === 'TP').length;
   const slCount    = r.slCount    ?? r.trades.filter(t => t.reason === 'SL').length;
@@ -7620,11 +7676,8 @@ function renderBtResults(r) {
       <span class="bt-result-val ${pnl>=0?'g':'r'}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
     </div>
     <div class="bt-result-card" style="grid-column:1/-1">
-      <span class="bt-result-lbl">Profit Target — $${r.profitTarget} ${tgtHit ? 'HIT' : `(${tgtPct.toFixed(0)}% reached)`}</span>
-      <div style="height:4px;background:var(--border2);border-radius:2px;margin-top:6px;overflow:hidden">
-        <div style="height:100%;border-radius:2px;background:${tgtHit?'var(--green)':'var(--gold)'};width:${tgtPct}%;transition:width .4s"></div>
-      </div>
-      <span class="bt-result-val ${tgtHit?'g':pnl>0?'au':'r'}" style="margin-top:4px">${pnl>=0?'+':''}$${pnl.toFixed(2)} / $${r.profitTarget}</span>
+      <span class="bt-result-lbl">Daily Profit Target — $${r.profitTarget}${r.profitTarget > 0 ? ` · locked ${hits}× over ${days} day${days===1?'':'s'} (~${avgHitsPerDay.toFixed(1)}/day)` : ''}</span>
+      <span class="bt-result-val ${hits>0?'g':'au'}" style="margin-top:4px">${r.profitTarget > 0 ? `${hits} lock${hits===1?'':'s'} — bot kept trading through every one` : 'No target set'}</span>
     </div>
     <div class="bt-result-card">
       <span class="bt-result-lbl">Return</span>
@@ -7774,15 +7827,10 @@ function renderLiveHistory() {
   const pfCls  = parseFloat(pf) >= 1 || pf === '∞' ? 'g' : 'r';
 
   const profitTarget = CFG.PROFIT_TARGET || 0;
-  const tgtPct  = profitTarget > 0 ? Math.min(100, Math.max(0, pnlTotal) / profitTarget * 100) : 0;
-  const tgtHit  = profitTarget > 0 && pnlTotal >= profitTarget;
   const tgtCard = profitTarget > 0 ? `
     <div class="bt-result-card" style="grid-column:1/-1">
-      <span class="bt-result-lbl">Profit Target — $${profitTarget} ${tgtHit ? 'HIT' : `(${tgtPct.toFixed(0)}% reached)`}</span>
-      <div style="height:4px;background:var(--border2);border-radius:2px;margin-top:6px;overflow:hidden">
-        <div style="height:100%;border-radius:2px;background:${tgtHit?'var(--green)':'var(--gold)'};width:${tgtPct}%"></div>
-      </div>
-      <span class="bt-result-val ${tgtHit?'g':pnlTotal>0?'au':'r'}" style="margin-top:4px">${pnlTotal>=0?'+':''}$${pnlTotal.toFixed(2)} / $${profitTarget}</span>
+      <span class="bt-result-lbl">Daily Profit Target — $${profitTarget} · locked ${profitLockHits || 0}× today</span>
+      <span class="bt-result-val ${(profitLockHits||0)>0?'g':'au'}" style="margin-top:4px">Vault: $${(lockedProfit||0).toFixed(2)} banked · bot keeps trading through every lock</span>
     </div>` : '';
 
   const openTag = demoPositions.length
