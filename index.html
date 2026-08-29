@@ -1150,7 +1150,7 @@ const CFG = {
   LEVERAGE     : 20,          // account leverage — tune to your broker/exchange's actual BTCUSD leverage cap
   MAX_SPREAD_USD: 30,         // reference only — spread guard removed, trades no longer gated on this
   MAX_SL_PTS   : 450.0,       // Hard cap on SL distance in $ (rescaled for BTCUSD's price magnitude — tune to live ATR)
-  MAX_CONCURRENT_POS: 2,      // how many trades the bot can hold open at once — trend-filtered signals tend to be same-direction, so kept modest to avoid stacking correlated risk
+  MAX_CONCURRENT_POS: 5,      // was 3 (orig 2) — how many trades the bot can hold open at once
   // Portfolio-heat cap, in R multiples (1R = one trade's quality-multiplier-
   // boosted risk). Since this bot only trades BTCUSD, concurrent positions
   // are highly correlated — this stops the per-trade quality size bonus from
@@ -1578,19 +1578,18 @@ const REFINED_STRATEGY_CFG = {
   // the bot now fires far more often — it no longer needs five separate
   // structural conditions to line up at once.
   simple: {
-    lookbackBars: 8,       // how many prior M1 candles define "the recent range" to break
-    minBodyRatio: 0.30,    // candle body must be >= this % of its own high-low range (filters dojis/noise)
-    useTrendFilter: true,  // if true, skip trades clearly against the M5 EMA21/50 trend; set false for even more trades
+    lookbackBars: 3,        // was 5 (orig 8) — even less distance needed to count as a "breakout"
+    minBodyRatio: 0.10,     // was 0.20 (orig 0.30) — accepts weak/near-doji candles too
+    useTrendFilter: true,   // was false — re-enabled: trading with the M5 trend is the single biggest lever
+                             // for setups that "almost win" rather than firing into a countertrend fade
     // Note: the SL ATR cushion still comes from trade.slBufferATR below — unchanged.
 
     // ---- quality upgrades (cheap filters that cut weak trades without reintroducing the old 5-gate chain) ----
-    avoidDeadRegime: true,   // skip only near-zero-volatility conditions, where any "breakout" is just spread noise
-    avoidNewsRelease: true,  // skip only the actual ±5min high-impact release window (spread spikes/fake wicks)
+    avoidDeadRegime: false,  // was true — trades low-volatility/DEAD regime instead of sitting out
+    avoidNewsRelease: true,  // was false — re-enabled: the ±5min release window is where spread spikes and
+                              // fake wicks live, the fastest way to turn a good setup into a near-miss loss
     roomLookbackBars: 25,    // window used to check for a nearby opposing swing extreme ahead of the trade
-    minRoomATR: 0.8          // was 0.5 — require more clear runway before the nearest opposing extreme;
-                              // this is a continuous score/gate input off breakout candles that already
-                              // pass every other check, so it costs relatively few trades/day while cutting
-                              // the setups most likely to reverse immediately into resistance/support
+    minRoomATR: 0.2          // was 0.4 (orig 0.8) — needs almost no runway before the nearest opposing extreme
   },
 
   // ---------- Liquidity (kept for chart zone drawing / backtesting tools only — no longer gates entries) ----------
@@ -1665,7 +1664,9 @@ const REFINED_STRATEGY_CFG = {
 
   // ---------- Quality engine ----------
   quality: {
-    minimumScore: 25,   // restored — the trend filter now does the main filtering, so this just screens out the weakest setups
+    minimumScore: 30,   // was 8 — raised back up above even the original 25: with lookback/body/room/regime
+                         // all still loose (kept from before), this is now the main quality gate — screens for
+                         // setups that genuinely have breakout strength + trend + room, not just any candle
     strongScore: 45,
     premiumScore: 65,
 
@@ -5350,7 +5351,7 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
     slDist = CFG.MAX_SL_PTS;
     addSignal('info', `SL capped to max $${CFG.MAX_SL_PTS}: ${slPrice.toFixed(2)}`, mid);
   }
-  if(slDist < 15) { addSignal('warn','SL too tight (< $15) — skipping',null); return; }
+  if(slDist < 0.5) { addSignal('warn','SL too tight (< $0.5) — skipping',null); return; }
   const rr = gradeRRContinuous(qualityScore) ?? gradeRR(quality);
   const tpPrice = isBuy ? entryPrice + slDist * rr : entryPrice - slDist * rr;
 
@@ -6417,7 +6418,7 @@ function runStrategy() {
   }
 
   // ── SWEEP EPOCH DEDUPLICATION (shortened cooldown + tighter price tolerance so more setups qualify) ──
-  const COOLDOWN   = 45 * 1000;   // was 3.5 min, now 45s
+  const COOLDOWN   = 10 * 1000;   // was 20s (originally 3.5 min) — shorter gap before re-trading the same level
   const PRICE_TOL  = 0.05;        // was 0.21
 
   const isBullDup = bs.sweepEpoch !== undefined && (
@@ -6630,6 +6631,8 @@ const replay = {
     this.replayLastBullPrice = 0; this.replayLastBearPrice = 0;
     this.replayLastSigEpoch = 0; this.replayPosIdCounter = 0;
     this.replayProfitTarget = profitTarget;
+    this.replayProfitBaseline = startBal;
+    this.replayProfitHits = 0;
     this._enterReplayMode();
     this._tick();
     this._scheduleNext();
@@ -6686,15 +6689,18 @@ const replay = {
     this._processCandle(true);
     this.index++;
 
-    // ── Profit target early-exit ─────────────────────────────────────────────
-    // Stop the replay as soon as the balance gain meets or exceeds the target.
-    // Previously this value was only recorded in results but never enforced.
-    if (this.replayProfitTarget > 0 &&
-        (this.replayBal - this.replayStartBal) >= this.replayProfitTarget) {
-      addSignal('info',
-        `[BT] Profit target $${this.replayProfitTarget.toFixed(2)} reached — stopping replay early`, null);
-      this._finish();
-      return;
+    // ── Profit target: tracked for stats/UI only, never halts trading. ──
+    // Mirrors live checkProfitLock() — every time the balance climbs another
+    // full target-sized increment above the last baseline, log a "hit" and
+    // move the baseline forward, so the bot keeps compounding and can hit
+    // the target repeatedly across the run instead of stopping at the first hit.
+    if (this.replayProfitTarget > 0) {
+      while (this.replayBal - this.replayProfitBaseline >= this.replayProfitTarget) {
+        this.replayProfitHits++;
+        this.replayProfitBaseline += this.replayProfitTarget;
+        addSignal('info',
+          `[BT] Profit target #${this.replayProfitHits} ($${this.replayProfitTarget.toFixed(2)}) reached — continuing to trade`, null);
+      }
     }
 
     const pct = ((this.index - 100) / (this.data.length - 100)) * 100;
@@ -6990,7 +6996,7 @@ const replay = {
     // sweep candle gets a new index each bar and the dedup never fires →
     // the same liquidity pool gets re-traded on every bar after a close.
     // FIX: use epoch (seconds) + price-level proximity, same as live mode.
-    const SWEEP_COOLDOWN_S  = 20 * 60;  // 20-minute cooldown (in epoch seconds)
+    const SWEEP_COOLDOWN_S  = 5 * 60;  // was 10 min (orig 20 min) — shorter cooldown (in epoch seconds), matches live-mode loosening
     const SWEEP_PRICE_TOL   = 0.3;      // 0.3 pt price-level tolerance
 
     const isBullDup = bs.sweepEpoch !== undefined && bs.score < 9 && (
@@ -7067,7 +7073,7 @@ const replay = {
       slPrice = isBuy ? entryPrice - CFG.MAX_SL_PTS : entryPrice + CFG.MAX_SL_PTS;
       slDist = CFG.MAX_SL_PTS;
     }
-    if (slDist < 15) return;
+    if (slDist < 0.5) return;
     const rr = gradeRRContinuous(sig.qualityScore) ?? gradeRR(sig.quality);
     const tpPrice = isBuy ? entryPrice + slDist * rr : entryPrice - slDist * rr;
 
