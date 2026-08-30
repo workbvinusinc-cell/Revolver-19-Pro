@@ -1128,14 +1128,35 @@ input[type=range]::-webkit-slider-thumb{
 // ── BINANCE PUBLIC API CONFIG ──
 // Free, no API key required. REST klines for historical candles + combined
 // WebSocket stream (bookTicker + kline_1m/5m/15m) for live bid/ask and OHLC.
+//
+// GEO-BLOCK FALLBACK: binance.com (both REST api.binance.com and WS
+// stream.binance.com) returns HTTP 451 / refuses the socket handshake for
+// US-origin IPs — this is the #1 reason "connecting..." spins forever with
+// no live tick feed ever arriving, and it's an IP-level block the app can't
+// see coming ahead of time. If the primary host fails to open a socket a
+// few times in a row, _connectBinance() below automatically retries against
+// Binance.US (a separate, US-compliant exchange with the same BTCUSDT
+// symbol and a wire-compatible API), so a US-based browser recovers on its
+// own instead of looping forever against a host that will never answer it.
+const BINANCE_HOSTS = [
+  { label: 'Binance.com', wsBase: 'wss://stream.binance.com:9443', restBase: 'https://api.binance.com/api/v3/klines' },
+  { label: 'Binance.US',  wsBase: 'wss://stream.binance.us:9443',  restBase: 'https://api.binance.us/api/v3/klines'  },
+];
+let _binanceHostIdx = 0;
 const BINANCE_SYMBOL     = 'BTCUSDT';
 const BINANCE_STREAM     = 'btcusdt';
-const BINANCE_WS_URL     = `wss://stream.binance.com:9443/stream?streams=${BINANCE_STREAM}@bookTicker/${BINANCE_STREAM}@kline_1m/${BINANCE_STREAM}@kline_5m/${BINANCE_STREAM}@kline_15m`;
-const BINANCE_REST_BASE  = 'https://api.binance.com/api/v3/klines';
+function _binanceWsUrl() {
+  const host = BINANCE_HOSTS[_binanceHostIdx];
+  return `${host.wsBase}/stream?streams=${BINANCE_STREAM}@bookTicker/${BINANCE_STREAM}@kline_1m/${BINANCE_STREAM}@kline_5m/${BINANCE_STREAM}@kline_15m`;
+}
+function _binanceRestBase() {
+  return BINANCE_HOSTS[_binanceHostIdx].restBase;
+}
 const CONTRACT_SIZE = 1;          // 1 lot = 1 BTC (crypto CFD convention) — verify against your broker's actual contract spec; was 100 (oz/lot) for gold
 
 let _binanceWS             = null;  // WebSocket handle — Binance live feed
 let _binanceReconnectTimer = null;
+let _binanceOpenFailures   = 0;     // consecutive failed connect attempts on the current host — triggers failover
 
 const CFG = {
   RISK_PCT     : 1.0,
@@ -6525,7 +6546,7 @@ async function _binanceLoadHistory() {
   const specs = [[60, '1m', 500], [300, '5m', 200], [900, '15m', 100]];
   for (const [gran, interval, limit] of specs) {
     try {
-      const url = `${BINANCE_REST_BASE}?symbol=${BINANCE_SYMBOL}&interval=${interval}&limit=${limit}`;
+      const url = `${_binanceRestBase()}?symbol=${BINANCE_SYMBOL}&interval=${interval}&limit=${limit}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
@@ -6557,35 +6578,65 @@ function _connectBinance() {
   if (_binanceWS) { try { _binanceWS.close(); } catch(_) {} _binanceWS = null; }
   if (_binanceReconnectTimer) { clearTimeout(_binanceReconnectTimer); _binanceReconnectTimer = null; }
 
-  addSignal('info', 'Connecting to Binance WebSocket...', null);
+  const hostLabel = BINANCE_HOSTS[_binanceHostIdx].label;
+  addSignal('info', `Connecting to ${hostLabel} WebSocket...`, null);
   setConn('wait');
 
   // Historical bars load independently over REST — no need to wait for the
   // WebSocket to open first.
   _binanceLoadHistory();
 
-  const ws = new WebSocket(BINANCE_WS_URL);
+  const ws = new WebSocket(_binanceWsUrl());
   _binanceWS = ws;
+  let openedThisAttempt = false;
 
   ws.onopen = () => {
+    openedThisAttempt = true;
+    _binanceOpenFailures = 0;   // this host works — clear the failover counter
     setConn('on');
     authed = true;
-    addSignal('info', 'Binance connected — BTCUSDT live tick feed active', null);
+    addSignal('info', `${hostLabel} connected — BTCUSDT live tick feed active`, null);
   };
 
   ws.onmessage = evt => {
     try { _handleBinanceMsg(JSON.parse(evt.data)); } catch(_) {}
   };
 
-  ws.onclose = () => {
+  ws.onclose = evt => {
     _binanceWS = null;
     setConn('wait');
-    addSignal('warn', 'Binance disconnected — reconnecting in 5 s...', null);
+
+    // ── GEO-BLOCK / HOST FAILOVER ──
+    // A socket that closes without ever having opened is not a normal
+    // "connection dropped" — it means the handshake itself was refused,
+    // which on binance.com from a US-origin IP is almost always the
+    // regulatory geo-block (HTTP 451 equivalent at the WS layer). Retrying
+    // the SAME host forever just repeats the same refusal every 5s with no
+    // path to ever connecting. After a couple of failed handshakes in a
+    // row, switch to the next host in BINANCE_HOSTS and try that instead.
+    if (!openedThisAttempt) {
+      _binanceOpenFailures++;
+      const code = evt && evt.code != null ? evt.code : '?';
+      const reason = evt && evt.reason ? ` (${evt.reason})` : '';
+      addSignal('warn',
+        `${hostLabel} handshake failed — code ${code}${reason} · attempt ${_binanceOpenFailures}`, null);
+      if (_binanceOpenFailures >= 2 && BINANCE_HOSTS.length > 1) {
+        _binanceHostIdx = (_binanceHostIdx + 1) % BINANCE_HOSTS.length;
+        _binanceOpenFailures = 0;
+        const nextLabel = BINANCE_HOSTS[_binanceHostIdx].label;
+        addSignal('warn',
+          `Switching data source to ${nextLabel} — likely a regional block on the previous host`, null);
+        _binanceReconnectTimer = setTimeout(_connectBinance, 500);
+        return;
+      }
+    } else {
+      addSignal('warn', `${hostLabel} disconnected — reconnecting in 5 s...`, null);
+    }
     _binanceReconnectTimer = setTimeout(_connectBinance, 5000);
   };
 
   ws.onerror = () => {
-    // onclose will fire immediately after — let it handle the reconnect
+    // onclose fires immediately after with the real code/reason — handled there.
   };
 }
 
@@ -7852,7 +7903,7 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
       controller.abort();
       reject(new Error('Binance request timed out after 25s'));
     }, 25000);
-    const url = `${BINANCE_REST_BASE}?symbol=${BINANCE_SYMBOL}&interval=${gran}&startTime=${startMs}&endTime=${endMs}&limit=1000`;
+    const url = `${_binanceRestBase()}?symbol=${BINANCE_SYMBOL}&interval=${gran}&startTime=${startMs}&endTime=${endMs}&limit=1000`;
     fetch(url, { signal: controller.signal })
       .then(res => {
         clearTimeout(timer);
