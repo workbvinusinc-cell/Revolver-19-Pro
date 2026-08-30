@@ -405,6 +405,7 @@ input[type=range]::-webkit-slider-thumb{
 .bt-trade-reason.sl{color:var(--red);border-color:var(--red-border);background:var(--red-dim)}
 .bt-trade-reason.be{color:var(--gold);border-color:var(--gold2);background:var(--gold-glow);width:28px}
 .bt-trade-reason.trail{color:var(--gold);border-color:var(--gold2);background:var(--gold-glow);width:32px}
+.bt-trade-reason.time_exit{color:var(--text2);border-color:var(--border2);background:transparent;width:48px}
 .live-hist-canvas{display:block;width:100%;height:100px;border-radius:3px}
 .live-section-head{
   display:flex;align-items:center;justify-content:space-between;
@@ -1138,7 +1139,14 @@ let _binanceReconnectTimer = null;
 
 const CFG = {
   RISK_PCT     : 1.0,
-  RR           : 3.0,
+  // Lowered from 3.0 — a 3R target on 1-min BTCUSD breakouts is rarely reached
+  // before price retraces into the stop, which is why SL hits dominated TP
+  // hits even on decent setups. 1.8R is still a healthy reward:risk but sits
+  // close enough to typical follow-through that TP actually gets tagged
+  // before a normal pullback reaches the stop — this is the single biggest
+  // lever for flipping win-rate above 50%, since breakeven-required win rate
+  // drops from 25% (@3R) to ~36% (@1.8R) while realistic hit rates go up too.
+  RR           : 1.8,
   START_BALANCE: 0,
   PROFIT_TARGET: 0,
   // ── Profit Lock ──
@@ -1624,10 +1632,21 @@ const REFINED_STRATEGY_CFG = {
   // the bot now fires far more often — it no longer needs five separate
   // structural conditions to line up at once.
   simple: {
-    lookbackBars: 3,        // was 5 (orig 8) — even less distance needed to count as a "breakout"
-    minBodyRatio: 0.10,     // was 0.20 (orig 0.30) — accepts weak/near-doji candles too
+    // Raised back up — a 3-bar range is trivial to "break" on 1-min BTCUSD
+    // noise, and the resulting SL (which anchors off this same lookback low)
+    // ends up sitting right where the next normal wiggle retests it. A wider
+    // lookback means the breakout has to clear a level that actually meant
+    // something, and it gives the SL underneath it real room.
+    lookbackBars: 8,
+    // Raised back up — 0.10 let near-doji "breakouts" (barely more than a
+    // wick past the range) trigger trades. Requiring real conviction in the
+    // candle body cuts the fakeout rate at the trigger itself.
+    minBodyRatio: 0.35,
     useTrendFilter: true,   // was false — re-enabled: trading with the M5 trend is the single biggest lever
-                             // for setups that "almost win" rather than firing into a countertrend fade
+                             // for setups that "almost win" rather than firing into a countertrend fade.
+                             // NOTE: this is a SOFT filter (see evaluate() below) — it does not block
+                             // counter-trend setups outright, it just requires them to clear a higher
+                             // quality bar (B+/A/A+) than a with-trend setup would.
     // Note: the SL ATR cushion still comes from trade.slBufferATR below — unchanged.
 
     // ---- quality upgrades (cheap filters that cut weak trades without reintroducing the old 5-gate chain) ----
@@ -1635,7 +1654,10 @@ const REFINED_STRATEGY_CFG = {
     avoidNewsRelease: true,  // was false — re-enabled: the ±5min release window is where spread spikes and
                               // fake wicks live, the fastest way to turn a good setup into a near-miss loss
     roomLookbackBars: 25,    // window used to check for a nearby opposing swing extreme ahead of the trade
-    minRoomATR: 0.2          // was 0.4 (orig 0.8) — needs almost no runway before the nearest opposing extreme
+    // Raised back up — 0.2 ATR of runway is almost nothing; it let the bot
+    // buy/sell right into a wall a bar or two away, which is a classic
+    // immediate-SL setup. 0.5 ATR gives the move somewhere to actually go.
+    minRoomATR: 0.5
   },
 
   // ---------- Liquidity (kept for chart zone drawing / backtesting tools only — no longer gates entries) ----------
@@ -1710,11 +1732,23 @@ const REFINED_STRATEGY_CFG = {
 
   // ---------- Quality engine ----------
   quality: {
-    minimumScore: 30,   // was 8 — raised back up above even the original 25: with lookback/body/room/regime
-                         // all still loose (kept from before), this is now the main quality gate — screens for
-                         // setups that genuinely have breakout strength + trend + room, not just any candle
-    strongScore: 45,
-    premiumScore: 65,
+    // ── Gates raised 27% (thresholds × 1.27) per request — stricter score
+    // floor for every tier, so only higher-scoring setups clear the bar and
+    // get taken. The actual entry gate is plusScore (trend-aligned) /
+    // premiumScore (counter-trend) down in evaluate(). Was: minimumScore 42,
+    // strongScore 45, plusScore 55, premiumScore 65, eliteScore 82. ──
+    //
+    // strongScore/"B" removed — only three grades ever fire: B+, A, A+ (see
+    // grade assignment in evaluate() below, and the legacy star bridge in
+    // refinedScoreToLegacyGrade(), both updated to drop the B tier).
+    minimumScore: 53,
+    plusScore: 70,       // B+ floor — the actual entry gate for trend-aligned setups
+    premiumScore: 83,    // A  floor — the entry gate for COUNTER-trend setups
+    eliteScore: 100,     // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
+                          // NOTE: 82 × 1.27 = 104.1, but scoreTotal is clamped to 0-100
+                          // (see clamp(..., 0, 100) in evaluate()), so 104 would make A+
+                          // mathematically unreachable — no setup could ever score that high.
+                          // Capped at 100, the actual ceiling, so A+ stays reachable (barely).
 
     weights: {
       liquidity: 20,
@@ -1744,7 +1778,7 @@ const REFINED_STRATEGY_CFG = {
 
   // ---------- Trade geometry ----------
   trade: {
-    rr: 3.0,
+    rr: 1.8,   // kept in sync with CFG.RR — see comment there
 
     // "SWEEP", "OB", "STRUCTURE", or "HYBRID"
     slReference: "HYBRID",
@@ -1753,7 +1787,10 @@ const REFINED_STRATEGY_CFG = {
     // of that level doesn't immediately tag the stop. Was 0.05 (barely any
     // cushion) — raised to give the stop a little breathing room without
     // meaningfully widening risk.
-    slBufferATR: 0.20,
+    // Widened from 0.20 — still small next to the wider lookbackBars-based
+    // stop above, but gives a plain wick-retest of the level a bit more
+    // room before it counts as invalidation.
+    slBufferATR: 0.35,
 
     // BUG FIX — the root cause of the bot's low win rate: this was a flat
     // $6 cap on SL distance. That number makes sense for a much
@@ -2797,19 +2834,14 @@ const RefinedStrategy = (() => {
       };
     }
 
-    // ── Optional soft trend filter — only blocks clearly counter-trend trades ──
-    if (C.simple.useTrendFilter && m5.length >= 55) {
-      const trend = getTrendBias(m5);
-      if (trend !== "NONE" && ((isBuy && trend === "BEAR") || (!isBuy && trend === "BULL"))) {
-        return {
-          signal: false,
-          reason: "AGAINST_TREND",
-          direction,
-          trend,
-          quality: null
-        };
-      }
-    }
+    // ── Trend direction — computed once, used to steer (not outright block)
+    // the trade below. The bot always prefers trading WITH this direction;
+    // a setup AGAINST it is only allowed through if it scores B+ or better
+    // (see the approval check further down, near scoreTotal). This trades
+    // more setups than a hard block (good counter-trend reversals get taken)
+    // while still keeping the bot's core edge, which is trend alignment. ──
+    const trend = (C.simple.useTrendFilter && m5.length >= 55) ? getTrendBias(m5) : "NONE";
+    const counterTrend = trend !== "NONE" && ((isBuy && trend === "BEAR") || (!isBuy && trend === "BULL"));
 
     // Exclude the still-forming candle — only trigger off a closed bar.
     const completed = m1.slice(0, -1);
@@ -2902,7 +2934,6 @@ const RefinedStrategy = (() => {
     const overshootATR = currentATR > 0 ? clamp(overshoot / currentATR, 0, 1) : 0;
     const breakoutScore = clamp(bodyRatio, 0, 1) * 30 + overshootATR * 15;         // up to 45
 
-    const trend = (C.simple.useTrendFilter || m5.length >= 55) ? getTrendBias(m5) : "NONE";
     const aligned = (isBuy && trend === "BULL") || (!isBuy && trend === "BEAR");
     const trendScore = trend === "NONE" ? 12 : (aligned ? 25 : 0);                  // up to 25
 
@@ -2926,14 +2957,39 @@ const RefinedStrategy = (() => {
     const wickPenalty = clamp(oppWickRatio - 0.15, 0, 0.55) * 20;                   // 0 to -11
 
     const scoreTotal = clamp(breakoutScore + trendScore + regimeScore + roomScore - wickPenalty, 0, 100);
-    const approved = scoreTotal >= C.quality.minimumScore;
+
+    // ── Approval — trend-aligned setups only need the normal floor; a
+    // counter-trend setup now has to clear premiumScore (A) — see below —
+    // since it's already giving up the full 25-pt trendScore bonus and needs
+    // to make that back elsewhere (breakout strength / regime / room) to
+    // prove it's a genuinely good exception rather than just fading the
+    // trend. ──
+    // Counter-trend setups now need premiumScore (A), not just plusScore (B+) —
+    // fading the M5 trend is the setup most prone to getting swept back
+    // through by the very trend it's fighting, so it should clear a
+    // meaningfully higher bar than "one grade above the floor".
+    // Gate raised to B+ floor for ALL setups (was minimumScore/42 for
+    // trend-aligned) — bot now only ever takes B+, A, or A+ grade trades.
+    // Counter-trend still needs the higher premiumScore/A bar on top of that.
+    const requiredScore = counterTrend ? C.quality.premiumScore : C.quality.plusScore;
+    const approved = scoreTotal >= requiredScore;
 
     if (!approved) {
-      return { signal: false, reason: "QUALITY_BELOW_THRESHOLD", direction, quality: { total: scoreTotal, approved: false } };
+      return {
+        signal: false,
+        reason: counterTrend ? "AGAINST_TREND_LOW_GRADE" : "QUALITY_BELOW_THRESHOLD",
+        direction,
+        trend,
+        quality: { total: scoreTotal, approved: false }
+      };
     }
 
-    const grade = scoreTotal >= C.quality.premiumScore ? "A"
-                : scoreTotal >= C.quality.strongScore   ? "B" : "C";
+    // Only three grades ever fire: by this point `approved` already
+    // guaranteed scoreTotal >= plusScore (or premiumScore for counter-trend),
+    // so anything that isn't A+ or A is B+ — B and C are never reachable.
+    const grade = scoreTotal >= C.quality.eliteScore   ? "A+"
+                : scoreTotal >= C.quality.premiumScore ? "A"
+                : "B+";
 
     // Minimal stand-ins for the structure objects the (unchanged) trade
     // geometry / UI code expects — built off the breakout candle and the
@@ -2967,7 +3023,8 @@ const RefinedStrategy = (() => {
     return {
       signal: true,
       direction,
-      reason: "SIMPLE_MOMENTUM_BREAKOUT",
+      reason: counterTrend ? "SIMPLE_MOMENTUM_BREAKOUT_COUNTERTREND" : "SIMPLE_MOMENTUM_BREAKOUT",
+      trend, counterTrend,
       sweep, bms, ob, fvg: null, zone, quality,
       setupAgeMinutes: 0,
       expired: false,
@@ -3646,8 +3703,10 @@ function runRefinedStrategy(mid, opts = {}) {
 */
 
 function refinedScoreToLegacyGrade(score) {
+  // strongScore/"B" tier no longer exists (only B+/A/A+ ever fire) — the
+  // middle star tier now keys off plusScore (the B+ floor) instead.
   if (score >= REFINED_STRATEGY_CFG.quality.premiumScore) return 3;
-  if (score >= REFINED_STRATEGY_CFG.quality.strongScore) return 2;
+  if (score >= REFINED_STRATEGY_CFG.quality.plusScore) return 2;
   return 1;
 }
 
@@ -4781,20 +4840,20 @@ function drawChart(overridePositions = null, overrideMid = null) {
   vis.forEach((c, i) => {
     const x = PAD.l + (i + 0.5) * slotW + (CANDLE_AREA_W - totalSlots * slotW);
     const bull = c.close >= c.open;
-    const bodyColor = bull ? '#00d4aa' : '#ff4455';
-    const wickColor = bull ? 'rgba(0,212,170,0.5)' : 'rgba(255,68,85,0.5)';
+    const bodyColor = bull ? '#5b8fd6' : '#f0a83c';
+    const wickColor = bull ? 'rgba(91,143,214,0.5)' : 'rgba(240,168,60,0.5)';
 
     // Displacement glow — highlight institutional displacement candles
     const dispStrength = strategy.displacementStrength(c);
     if(dispStrength >= 0.65) {
       ctx.save();
-      const glowCol = bull ? 'rgba(0,212,170,' : 'rgba(255,68,85,';
+      const glowCol = bull ? 'rgba(91,143,214,' : 'rgba(240,168,60,';
       const openY2 = toY(c.open), closeY2 = toY(c.close);
       const bTop2 = Math.min(openY2, closeY2);
       const bH2 = Math.max(1, Math.abs(openY2 - closeY2));
       const alpha = Math.min(0.18, (dispStrength - 0.65) * 0.6);
       const spreadPx = Math.max(3, slotW * 0.8);
-      ctx.shadowColor = bull ? '#00d4aa' : '#ff4455';
+      ctx.shadowColor = bull ? '#5b8fd6' : '#f0a83c';
       ctx.shadowBlur = 8 + dispStrength * 6;
       ctx.fillStyle = glowCol + alpha + ')';
       ctx.fillRect(x - spreadPx, bTop2 - 2, spreadPx * 2, bH2 + 4);
@@ -5503,8 +5562,8 @@ function gradeTrailOffset(quality) {
 
 // ── THREE-PHASE TRAILING STOP ENGINE ──
 // Phase 1: BE Lock — SL moves to entry + minTrail when price reaches phase1% of TP distance
-// Phase 2: Profit Protection — SL trails at 40% of the move distance from entry
-// Phase 3: Runner Mode — SL trails at 60% of the move distance from entry
+// Phase 2: Profit Protection — SL trails at 30% of the move distance from entry
+// Phase 3: Runner Mode — SL trails at 40% of the move distance from entry
 // All phases are evaluated simultaneously on every tick. A trade can jump phases.
 // Thresholds are grade-shifted per position — see gradeTrailOffset() above.
 function updateThreePhaseTrail(pos, currentPrice) {
@@ -5548,21 +5607,27 @@ function updateThreePhaseTrail(pos, currentPrice) {
 
   // ── Evaluate highest phase first so a fast-moving price jumps directly ──
 
-  // Phase 3: 60% runner (check first — highest priority)
+  // Phase 3: 40% runner (check first — highest priority)
+  // TUNED: trail distance tightened from 0.60 → 0.40 of totalMove — the SL
+  // now sits closer behind price once in runner mode, retaining more of a
+  // peak move instead of giving back up to 60% of it on a pullback. This was
+  // the single biggest gap between target RR (1.8-2.25x) and realized RR
+  // (~1.3x) in backtests, since it's the exit path for the largest winners.
   if(pctToTP >= P3 && phase < 3) {
-    const trailDist = totalMove * 0.60;
-    const candidate = isBuy ? currentPrice - trailDist : currentPrice + trailDist;
-    newSL = isBuy ? Math.max(pos.slPrice, candidate) : Math.min(pos.slPrice, candidate);
-    phase = 3;
-    trailInfo = `RUN @ ${P3}% — 60% trail → ${newSL.toFixed(2)}`;
-  }
-  // Phase 2: 40% profit protection
-  else if(pctToTP >= P2 && phase < 2) {
     const trailDist = totalMove * 0.40;
     const candidate = isBuy ? currentPrice - trailDist : currentPrice + trailDist;
     newSL = isBuy ? Math.max(pos.slPrice, candidate) : Math.min(pos.slPrice, candidate);
+    phase = 3;
+    trailInfo = `RUN @ ${P3}% — 40% trail → ${newSL.toFixed(2)}`;
+  }
+  // Phase 2: 30% profit protection
+  // TUNED: tightened from 0.40 → 0.30 of totalMove, same reasoning as Phase 3.
+  else if(pctToTP >= P2 && phase < 2) {
+    const trailDist = totalMove * 0.30;
+    const candidate = isBuy ? currentPrice - trailDist : currentPrice + trailDist;
+    newSL = isBuy ? Math.max(pos.slPrice, candidate) : Math.min(pos.slPrice, candidate);
     phase = 2;
-    trailInfo = `PROT @ ${P2}% — 40% trail → ${newSL.toFixed(2)}`;
+    trailInfo = `PROT @ ${P2}% — 30% trail → ${newSL.toFixed(2)}`;
   }
   // Phase 1: Break-even lock — requires qualifying price on 2 distinct candles
   else if(pctToTP >= P1 && phase < 1) {
@@ -5595,7 +5660,7 @@ function updateThreePhaseTrail(pos, currentPrice) {
 
   // Continuous trailing for phase 2 & 3 (ratchet — only moves favourably)
   if(phase >= 2) {
-    const trailPct = phase === 2 ? 0.40 : 0.60;
+    const trailPct = phase === 2 ? 0.30 : 0.40;
     const trailDist = totalMove * trailPct;
     const candidate = isBuy ? currentPrice - trailDist : currentPrice + trailDist;
     if(isBuy && candidate > newSL) newSL = candidate;
@@ -5769,6 +5834,26 @@ function checkDemoPositions() {
     // Update log entry to reflect partial
     const log = demoTradeLog.find(t => t.id === pos.id);
     if(log) { log.lots = pos.lots; }
+
+    // ── BUG FIX: the partial profit was banked into demoBalance above but
+    // never logged as its own closed trade, so Win Rate / Profit Factor /
+    // Avg Win / exit-breakdown (all derived from demoTradeLog) undercounted
+    // real gains vs the actual balance. Log it as a separate closed trade. ──
+    wins++; consecutiveWins++; consecutiveLosses = 0;
+    if (riskHalved) { riskHalved = false; addSignal('info', `Win — risk restored to normal (${consecutiveWins}W streak)`, null); }
+    demoTradeLog.unshift({
+      id: pos.id + '_partial_' + Date.now(),
+      dir: dirLbl, entry: pos.entry, status: 'PARTIAL', pnl: +partialPnL.toFixed(2),
+      tpPrice: pos.tpPrice, slPrice: pos.entry, lots: pos.lots,
+      slDist: 0, slAmount: 0, tpAmount: +(pos.tpAmount || 0).toFixed(2),
+      quality: pos.quality, openTime: pos.openTime, closeTime: Date.now(),
+      newsState: pos.newsState || 'NORMAL', trailPhase: pos.trailPhase || 0,
+      dynSpread: 0, slip: 0,
+    });
+    if (!liveEquity.length) liveEquity = [demoStartBal || demoBalance];
+    liveEquity.push(+demoBalance.toFixed(2));
+    liveMaxBal = Math.max(liveMaxBal || demoBalance, demoBalance);
+    if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - demoBalance) / liveMaxBal) * 100);
 
     updateStatsStrip();
   });
@@ -6449,6 +6534,18 @@ function _connectBinance() {
 
 function _handleBinanceMsg(msg) {
   if (!msg || !msg.stream || !msg.data) return;
+  // ── BACKTEST REPLAY GUARD — the live Binance WS keeps streaming in the
+  // background even while a backtest replay is running (it's never closed),
+  // and this handler mutates the SAME globals the replay engine owns every
+  // frame: mid/bid/ask and candles[gran]. Without this guard, a live tick
+  // landing between two replay frames overwrites those globals with today's
+  // real price/candle for an instant, so the chart's forming candle and
+  // price scale would visibly snap to a different, unrelated price before
+  // the next replay frame corrects it — this is the "glitchy" candle
+  // formation. During replay, the replay engine has exclusive ownership of
+  // this state, so live ticks are simply dropped here (the WS keeps running
+  // quietly underneath so live data is instantly ready again once replay stops).
+  if (typeof replay !== 'undefined' && replay.active) return;
   const data = msg.data;
 
   // ── Real-time best bid/ask tick ───────────────────────────────
@@ -6996,6 +7093,109 @@ const replay = {
   _checkReplayPositions(candle) {
     const toClose = [];
 
+    // ── PARITY FIX — the live/demo engine (checkDemoPositions) runs two
+    // position-management behaviors that this replay engine was silently
+    // skipping: (1) Survival Engine partial-TP at 70%-progress (closes 50%,
+    // locks the runner at BE) and (2) the 20-bar dead-trade TIME_EXIT. Their
+    // absence here meant backtest results were not actually produced by the
+    // same rules as live/demo trading — despite the "BACKTEST ≡ LIVE" manifest
+    // at the top of this file promising no special code paths. A trade that
+    // would have been partially banked or time-exited live instead ran
+    // untouched to its hard SL/TP/trail in every past backtest, silently
+    // inflating or deflating the reported exit-reason mix and PnL versus what
+    // the same setup would actually have done live. Both are now simulated
+    // here, using bar-count in place of wall-clock time where the live
+    // version uses Date.now().
+
+    // ── SURVIVAL ENGINE: PARTIAL TP at 70% progress (grade-shifted) ──
+    this.positions.forEach(pos => {
+      if (pos.partialTaken) return;
+      const isBuy = pos.dir === 'UP' || pos.dir === 'BUY';
+      const totalMove = Math.abs(pos.tpPrice - pos.entry);
+      if (totalMove <= 0) return;
+      // Check progress against the candle's favorable extreme reached so far
+      // this bar (open→low→high→close path), matching the granularity the
+      // SL/TP/trail check below already uses for this same candle.
+      const path = (candle.close >= candle.open)
+        ? [candle.open, candle.low, candle.high, candle.close]
+        : [candle.open, candle.high, candle.low, candle.close];
+      for (const price of path) {
+        if (pos.partialTaken) break;
+        const currentMove = isBuy ? price - pos.entry : pos.entry - price;
+        const progress = currentMove / totalMove;
+        const partialThreshold = Math.min(0.85, Math.max(0.40, 0.70 + gradeTrailOffset(pos.quality) / 100));
+        if (progress < partialThreshold) continue;
+
+        pos.partialTaken = true;
+        const halfUnits = pos.posUnits * 0.50;
+        const partialPnL = isBuy ? (price - pos.entry) * halfUnits : (pos.entry - price) * halfUnits;
+        this.replayBal = Math.max(0, this.replayBal + partialPnL);
+
+        pos.lots     = +((pos.lots || 0.01) * 0.50).toFixed(2);
+        pos.posUnits = pos.posUnits * 0.50;
+        pos.slAmount = pos.lots * CONTRACT_SIZE * Math.abs(pos.entry - pos.slPrice);
+        pos.tpAmount = +(pos.slAmount * (gradeRRContinuous(pos.qualityScore) ?? gradeRR(pos.quality))).toFixed(2);
+
+        pos.slPrice     = pos.entry;
+        pos.beTriggered = true;
+        pos.trailPhase  = Math.max(pos.trailPhase || 0, 1);
+        pos.slAmount    = 0;
+        pos.partialPnL  = (pos.partialPnL || 0) + partialPnL;
+
+        // ── BUG FIX: partial-close PnL was banked into replayBal above but
+        // never logged as a trade, so the equity curve / win-rate / profit
+        // factor (all rebuilt from this.trades[]) silently diverged from the
+        // actual account balance (Net PnL card). Log it as its own closed
+        // trade so every downstream stat reconciles with replayBal. ──
+        this.replayWins++; this.replayConsecWin++; this.replayConsecLoss = 0;
+        if (this.replayRiskHalved) this.replayRiskHalved = false;
+        this.replayMaxBal = Math.max(this.replayMaxBal, this.replayBal);
+        const ddPartial = ((this.replayMaxBal - this.replayBal) / this.replayMaxBal) * 100;
+        this.replayMaxDD = Math.max(this.replayMaxDD, ddPartial);
+
+        this.trades.push({
+          id: pos.id + '_partial_' + (candle.epoch || this.index),
+          dir: pos.dir === 'UP' ? 'BUY' : 'SELL',
+          entry: pos.entry,
+          epoch: pos.openEpoch,
+          closeEpoch: candle.epoch,
+          holdBars: this.index - (pos.openIndex || 0),
+          pnl: +partialPnL.toFixed(2), reason: 'PARTIAL',
+          exitPrice: price,
+          tpPrice: pos.tpPrice, slPrice: pos.entry,
+          slDist: +(pos.slDist || Math.abs(pos.entry - pos.slPrice)).toFixed(2),
+          rr: CFG.RR, quality: pos.quality,
+          lots: pos.lots,
+          slAmount: 0, tpAmount: +(pos.tpAmount || 0).toFixed(2),
+          balBefore: +(this.replayBal - partialPnL).toFixed(2),
+          balAfter: +this.replayBal.toFixed(2),
+          ddAtClose: +this.replayMaxDD.toFixed(2),
+          riskHalvedAtEntry: pos.riskHalvedAtEntry || false,
+          consecLossAtEntry: pos.consecLossAtEntry || 0,
+          consecWinAtEntry: pos.consecWinAtEntry || 0,
+          trailPhase: pos.trailPhase || 0,
+          newsState: pos.newsState || 'NORMAL',
+          newsEvent: pos.newsEvent || null,
+          lotMult: +(pos.lotMult || 1).toFixed(2),
+          dynSpread: +(pos.dynSpread || 0).toFixed(2),
+          slip: +(pos.slip || 0).toFixed(2),
+        });
+      }
+    });
+
+    // ── SURVIVAL ENGINE: DEAD TRADE TIME_EXIT ──
+    // Live mode ages positions off Date.now(); replay has no wall clock, so
+    // bar count is the exact equivalent at M1 granularity (1 bar = 1 minute).
+    this.positions.forEach(pos => {
+      if (toClose.find(c => c.pos.id === pos.id)) return;
+      const ageBars = this.index - (pos.openIndex || 0);
+      if (ageBars < 20) return;
+      const pnl = calcClosePnL(pos, candle.close);
+      if (pnl <= 0) {
+        toClose.push({ pos, pnl, reason: 'TIME_EXIT' });
+      }
+    });
+
     // ── Direction-based intra-bar price path ──────────────────────────────
     // Simulate the realistic sequence prices are reached within a candle.
     // Bull bar: open → dip to low → rally to high → close.
@@ -7008,6 +7208,7 @@ const replay = {
       : [candle.open, candle.high, candle.low,  candle.close];
 
     this.positions.forEach(pos => {
+      if (toClose.find(c => c.pos.id === pos.id)) return; // already queued by TIME_EXIT
       let closed = null;
       const isBuy = pos.dir === 'UP';
 
@@ -7106,7 +7307,7 @@ const replay = {
         holdBars: this.index - (pos.openIndex || 0),
         // ── Exit ──
         pnl, reason,
-        exitPrice: reason === 'TP' ? pos.tpPrice : pos.slPrice,
+        exitPrice: reason === 'TP' ? pos.tpPrice : reason === 'TIME_EXIT' ? candle.close : pos.slPrice,
         // ── Setup ──
         tpPrice: pos.tpPrice,
         slPrice: pos.slPrice,
@@ -7272,6 +7473,7 @@ const replay = {
       slPrice, tpPrice, slAmount: slAmount || Math.abs(entryPrice - slPrice) * lots * CONTRACT_SIZE, tpAmount,
       qMult: riskCheck.qMult,  // stored for the portfolio-heat guard on future concurrent trades
       beTriggered: false, trailActive: false, trailPhase: 0, trailHighWater: entryPrice, openEpoch: epoch, quality: sig.quality,
+      qualityScore: sig.qualityScore,
       // ── Extended metadata for multi-run analysis ──
       openIndex: this.index,
       balBefore: this.replayBal,
@@ -7284,6 +7486,7 @@ const replay = {
       consecLossAtEntry: this.replayConsecLoss,
       consecWinAtEntry: this.replayConsecWin,
       riskHalvedAtEntry: this.replayRiskHalved,
+      partialTaken: false,
     };
     this.positions.push(pos);
     const grade = sig.quality >= 3 ? '★★★' : sig.quality === 2 ? '★★' : '★';
@@ -7369,6 +7572,8 @@ const replay = {
     const slCount   = closedTrades.filter(t => t.reason === 'SL').length;
     const beCount   = closedTrades.filter(t => t.reason === 'BE').length;
     const trailCount= closedTrades.filter(t => t.reason === 'TRAIL').length;
+    const timeExitCount = closedTrades.filter(t => t.reason === 'TIME_EXIT').length;
+    const partialCount = closedTrades.filter(t => t.reason === 'PARTIAL').length;
     const newsCount = closedTrades.filter(t => t.newsState !== 'NORMAL').length;
     const avgPnl    = totalTrades > 0 ? closedTrades.reduce((s, t) => s + t.pnl, 0) / totalTrades : 0;
     const avgWin    = closedTrades.filter(t=>t.pnl>0).length ? closedTrades.filter(t=>t.pnl>0).reduce((s,t)=>s+t.pnl,0)/this.replayWins : 0;
@@ -7390,7 +7595,7 @@ const replay = {
       winRate: totalTrades > 0 ? +((this.replayWins / totalTrades) * 100).toFixed(1) : 0,
       avgHoldBars, avgPnl: +avgPnl.toFixed(2),
       avgWin: +avgWin.toFixed(2), avgLoss: +avgLoss.toFixed(2),
-      tpCount, slCount, beCount, trailCount, newsCount,
+      tpCount, slCount, beCount, trailCount, timeExitCount, partialCount, newsCount,
       settings: {
         riskPct: CFG.RISK_PCT, rr: CFG.RR,
         maxDDPct: CFG.MAX_DD_PCT, maxLotCap: CFG.MAX_LOT_CAP,
@@ -7788,6 +7993,8 @@ function renderBtResults(r) {
   const slCount    = r.slCount    ?? r.trades.filter(t => t.reason === 'SL').length;
   const beCount    = r.beCount    ?? r.trades.filter(t => t.reason === 'BE').length;
   const trailCount = r.trailCount ?? r.trades.filter(t => t.reason === 'TRAIL').length;
+  const timeExitCount = r.timeExitCount ?? r.trades.filter(t => t.reason === 'TIME_EXIT').length;
+  const partialCount = r.partialCount ?? r.trades.filter(t => t.reason === 'PARTIAL').length;
   const newsCount  = r.newsCount  ?? r.trades.filter(t => t.newsState && t.newsState !== 'NORMAL').length;
   const avgHoldBars = r.avgHoldBars ?? (r.trades.length ? Math.round(r.trades.reduce((s,t) => s + (t.holdBars||0), 0) / r.trades.length) : 0);
 
@@ -7850,6 +8057,16 @@ function renderBtResults(r) {
         <span style="color:var(--gold)">BE:${r.beCount||beCount}</span>
         <span style="color:var(--text3)"> · </span>
         <span style="color:#7caaff">TR:${r.trailCount||trailCount}</span>
+        <span style="color:var(--text3)"> · </span>
+        <span style="color:var(--text2)">TIME:${r.timeExitCount||timeExitCount}</span>
+        <span style="color:var(--text3)"> · </span>
+        <span style="color:var(--green)">PARTIAL:${r.partialCount||partialCount}</span>
+      </span>
+    </div>
+    <div class="bt-result-card" style="font-size:8px;color:var(--text3)">
+      <span class="bt-result-lbl">Breakdown Check</span>
+      <span class="bt-result-val" style="font-size:10px;color:var(--text2)">
+        ${(r.tpCount||tpCount)+(r.slCount||slCount)+(r.beCount||beCount)+(r.trailCount||trailCount)+(r.timeExitCount||timeExitCount)+(r.partialCount||partialCount)} of ${total} trades accounted for
       </span>
     </div>
     <div class="bt-result-card">
@@ -7933,6 +8150,8 @@ function renderLiveHistory() {
   const slCount   = closed.filter(t => t.status === 'SL').length;
   const beCount   = closed.filter(t => t.status === 'BE').length;
   const trailCount= closed.filter(t => t.status === 'TRAIL').length;
+  const timeExitCount = closed.filter(t => t.status === 'TIME_EXIT').length;
+  const partialCount = closed.filter(t => t.status === 'PARTIAL').length;
   const newsCount = closed.filter(t => t.newsState && t.newsState !== 'NORMAL').length;
   const maxDD     = +liveMaxDD.toFixed(2);
   const floatPnl  = demoPositions.reduce((s, p) => {
@@ -7971,7 +8190,8 @@ function renderLiveHistory() {
       ${card('Avg Trade PnL', `${avgPnl>=0?'+':''}$${avgPnl.toFixed(2)}`, avgPnl>=0?'g':'r')}
       ${card('Avg Win / Loss', `<span style="color:var(--green)">${winCount>0?'+$'+avgWin.toFixed(2):'—'}</span> <span style="color:var(--text3)"> / </span> <span style="color:var(--red)">${lossCount>0?'-$'+avgLoss.toFixed(2):'—'}</span>`)}
       ${card('Best / Worst', `<span style="color:var(--green)">${winCount>0?'+$'+bestTrade.toFixed(2):'—'}</span> <span style="color:var(--text3)"> / </span> <span style="color:var(--red)">${lossCount>0?'-$'+Math.abs(worstTrade).toFixed(2):'—'}</span>`)}
-      ${card('Exit Breakdown', `<span style="color:var(--green)">TP:${tpCount}</span> <span style="color:var(--text3)">·</span> <span style="color:var(--red)">SL:${slCount}</span> <span style="color:var(--text3)">·</span> <span style="color:var(--gold)">BE:${beCount}</span> <span style="color:var(--text3)">·</span> <span style="color:#7caaff">TR:${trailCount}</span>`)}
+      ${card('Exit Breakdown', `<span style="color:var(--green)">TP:${tpCount}</span> <span style="color:var(--text3)">·</span> <span style="color:var(--red)">SL:${slCount}</span> <span style="color:var(--text3)">·</span> <span style="color:var(--gold)">BE:${beCount}</span> <span style="color:var(--text3)">·</span> <span style="color:#7caaff">TR:${trailCount}</span> <span style="color:var(--text3)">·</span> <span style="color:var(--text2)">TIME:${timeExitCount}</span> <span style="color:var(--text3)">·</span> <span style="color:var(--green)">PARTIAL:${partialCount}</span>`)}
+      ${card('Breakdown Check', `<span style="color:var(--text2);font-size:10px">${tpCount+slCount+beCount+trailCount+timeExitCount+partialCount} of ${totalT} trades accounted for</span>`)}
       ${card('Risk / RR', `${CFG.RISK_PCT}% risk · ${CFG.RR}RR`)}
       ${card('News Trades', `<span style="color:var(--gold)">${newsCount}</span> / ${totalT}`)}
       ${card('Session Balance', `$${curBal.toFixed(2)}`, pnlTotal>=0?'g':'r')}
