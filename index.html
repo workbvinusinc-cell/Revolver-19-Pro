@@ -881,7 +881,7 @@ input[type=range]::-webkit-slider-thumb{
         <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:9px 12px;font-size:9px;color:var(--text2);line-height:1.8">
           <span style="color:var(--gold);font-family:var(--sans);font-size:9px;font-weight:700;display:block;margin-bottom:3px">BTCUSD · Binance BTCUSDT</span>
           Spread: $6–$16 typical · Asian: ~$18 · NY/LON overlap: ~$6 · News spike: ~$33+ (placeholder calibration)<br>
-          Slippage: $0–$4 · Execution: 50–200 ms · Leverage and spread guard set above<br>
+          Slippage: $0–$4 base, scaled up by order size and current volatility · Execution: 50–200 ms (simulated in both live and backtest fills) · Leverage and spread guard set above<br>
           Data: Binance BTCUSDT WebSocket · lots adjust x0.60–x1.20 by news impact
         </div>
       </div>
@@ -1005,7 +1005,7 @@ input[type=range]::-webkit-slider-thumb{
     <div class="bt-summary-note">
       Replays your strategy on real historical BTCUSD data from Binance. Uses identical ICT/BMS rules, session filters, and risk management as live mode — no data advantage, no repainting. M5 HTF bias + M1 execution. Trades appear on chart during replay.<br><br>
       <span style="color:var(--gold);font-family:var(--sans);font-size:8px;font-weight:700;letter-spacing:.08em">MARKET SIMULATION ACTIVE:</span><br>
-      News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: 0.18–0.55 typical | News spike: ~1.10–1.30 | Slippage: 0.00–0.12 pts | Execution: 50–200 ms
+      News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: $6–$16 typical, up to $33+ on news spikes | Slippage: $0–$4 base, scaled up by order size and volatility | Execution delay: 50–200 ms, simulated on every fill (was live-only — now applied in backtest too)
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Date Range (DD-MM-YYYY)</div>
@@ -1363,13 +1363,66 @@ function getLiveSpread(newsState) {
 
 // ── SLIPPAGE — near-zero on a fast synthetic/crypto feed, rarely > $3 ──
 // Slippage is modelled as a small random cost, rescaled to BTCUSD's $ magnitude.
-function getSlippage(isBuy) {
+//
+// REALISM FIX: a flat $0–4 draw was the same whether the order was 0.01 BTC
+// or 8 BTC, and the same in a dead-quiet session as in a volatility spike —
+// neither is how real market impact works. Two multipliers now scale the
+// base draw:
+//   sizeFactor — market impact grows with order size relative to a normal
+//                baseline lot (~0.5 BTC on this contract spec). This is the
+//                piece that was completely missing before: a strategy whose
+//                paper balance (and therefore position size) has grown 100x
+//                was still paying 1x-lot execution costs, which is the
+//                single biggest source of backtest-vs-live divergence on a
+//                compounding account.
+//   volMult    — impact grows with how fast price is currently moving
+//                (recent ATR), since thin/fast books slip more than calm ones.
+function getSlippage(isBuy, sizeFactor = 1, volMult = 1) {
   // 70% chance of zero or trivial slippage, 30% chance of minor slippage
   const r = Math.random();
-  const pts = r < 0.70
+  const basePts = r < 0.70
     ? Math.random() * 1                                       // near-zero fill
     : SIM.SLIP_MIN + Math.random() * (SIM.SLIP_MAX - SIM.SLIP_MIN); // $0–4
+  const pts = basePts * Math.max(1, sizeFactor) * Math.max(1, volMult);
   return isBuy ? pts : -pts;  // buy fills slightly higher, sell slightly lower
+}
+
+// Market-impact multiplier from order size. lots below the baseline get no
+// penalty; above it, impact scales up (soft, not linear — a 10x bigger order
+// doesn't cost 10x more slippage on a liquid BTCUSDT book, but it does cost
+// noticeably more than a 1x order).
+const SLIP_BASELINE_LOTS = 0.5;
+function slippageSizeFactor(lots) {
+  if (!lots || lots <= SLIP_BASELINE_LOTS) return 1;
+  return 1 + Math.log2(lots / SLIP_BASELINE_LOTS) * 0.35;
+}
+
+// Volatility multiplier from recent M1 range (same ATR proxy used for spread
+// widening above), so slippage — not just spread — reflects how fast price
+// is moving right now.
+function slippageVolFactor() {
+  const m1 = candles[60];
+  if (!m1 || m1.length < 5) return 1;
+  const recent = m1.slice(-5);
+  const avgRange = recent.reduce((s, c) => s + c.high - c.low, 0) / 5;
+  if (avgRange > 300) return 1.8;
+  if (avgRange > 150) return 1.35;
+  if (avgRange > 75)  return 1.1;
+  return 1;
+}
+
+// Size-regime proxy from account growth, used *before* the actual lot size
+// is known (entry price — and therefore slippage — has to be computed before
+// SL distance and position sizing run, in both the live and backtest paths).
+// A strategy risking a fixed % of balance grows its position size 1:1 with
+// balance, so balance-growth is a clean, order-independent stand-in for
+// "how much bigger are fills getting" without needing to restructure the
+// entry → geometry → sizing pipeline. Capped so it stays a friction cost,
+// not a strategy killer.
+function accountGrowthSlipFactor(balance, startBalance) {
+  if (!startBalance || !balance || balance <= startBalance) return 1;
+  const growthMult = balance / startBalance;
+  return 1 + Math.min(2.5, Math.log10(growthMult) * 0.6);
 }
 
 // ── EXECUTION DELAY — Exness Standard fast execution (50–150 ms) ──
@@ -5462,8 +5515,12 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
   const isBuy = dir === 'UP';
   // ── LIVE SPREAD — real bid/ask from Binance + news overlay ──
   const dynSpread = getLiveSpread(newsEngine.state);
-  // ── SLIPPAGE ──
-  const slip = getSlippage(isBuy);
+  // ── SLIPPAGE — scaled by order-size regime (balance growth) and current
+  // volatility, not a flat draw, so bigger/faster fills cost more, matching
+  // the backtest path below (_openReplayPosition) exactly. ──
+  const growthSlip = accountGrowthSlipFactor(demoBalance, demoStartBal || demoBalance);
+  const volSlip = slippageVolFactor();
+  const slip = getSlippage(isBuy, growthSlip, volSlip);
   const entryPrice = +(isBuy
     ? mid + dynSpread / 2 + slip
     : mid - dynSpread / 2 + slip).toFixed(2);
@@ -6816,7 +6873,22 @@ const replay = {
   trades: [],
   timer: null,
   liveSnapshot: null,
-  BASE_INTERVAL: 200,
+  BASE_INTERVAL: 200,   // legacy reference only, no longer drives scheduling — see _tick()
+  // ── FRAME-BUDGETED REPLAY THROUGHPUT ──
+  // Old engine: one setTimeout + one full chart render PER CANDLE, at every
+  // speed. Render + timer overhead dwarfed the nominal per-candle interval,
+  // which is why "26×" (nominally ~7.7ms/candle) actually took ~1.5hr to
+  // replay a year of M1 candles instead of the expected ~25min.
+  // New engine: process candles in a tight loop for a real time-budget each
+  // animation frame (~30fps), then render ONCE per frame regardless of how
+  // many candles were processed in it. Budget scales with the selected
+  // speed so 26× uses nearly the whole frame for computation (maximum
+  // throughput this browser/device can sustain), while slower presets get
+  // proportionally smaller budgets — so the dropdown's ordering (0.12× ...
+  // 26×) is preserved, just recalibrated to actually hit "under 10 minutes
+  // for a year of data" at the top end.
+  FRAME_BUDGET_CAP_MS: 30,
+  MAX_CANDLES_PER_FRAME: 4000,   // safety valve only; time budget is what normally stops a batch
   replayBal: 0,
   replayStartBal: 0,
   replayHardFloor: 0,
@@ -6885,15 +6957,19 @@ const replay = {
     this.replayProfitHits = 0;
     this.replayProfitHitsToday = 0;
     this._enterReplayMode();
+    // NOTE: _tick() schedules its own follow-up frame internally — calling
+    // _scheduleNext() again here (as the old code did) started a second,
+    // overlapping timer chain from the very first frame, silently doubling
+    // up processing/rendering for the life of the run. _tick() alone is
+    // sufficient to kick off the loop.
     this._tick();
-    this._scheduleNext();
     addSignal('info', `Replay started — ${this.data.length.toLocaleString()} candles`, null);
   },
 
   stop() {
     if (!this.active) return;
     this.active = false; this.paused = false;
-    clearTimeout(this.timer);
+    cancelAnimationFrame(this.timer);
     if (this.liveSnapshot) {
       candles[60]  = this.liveSnapshot.candles60;
       candles[300] = this.liveSnapshot.candles300;
@@ -6931,20 +7007,36 @@ const replay = {
       if (this.index >= this.data.length - 1) this._finish();
       return;
     }
-    const interval = this.BASE_INTERVAL / this.speed;
-    this.timer = setTimeout(() => this._tick(), interval);
+    // requestAnimationFrame instead of setTimeout: no per-call scheduling
+    // overhead, no nested-timeout clamping, and it naturally paces itself to
+    // the display's actual refresh rate instead of us guessing an interval.
+    this.timer = requestAnimationFrame(() => this._tick());
   },
 
   _tick() {
-    if (!this.active) return;
-    this._processCandle(true);
-    this.index++;
+    if (!this.active || this.paused) return;
+
+    // ── Process a batch of candles within this frame's time budget ──
+    // Budget scales with speed (see FRAME_BUDGET_CAP_MS comment above).
+    // Rendering happens once per frame, not once per candle — that single
+    // change removes the dominant cost of the old engine.
+    const budgetMs = Math.min(this.FRAME_BUDGET_CAP_MS, Math.max(1, this.speed * 1.2));
+    const t0 = performance.now();
+    let processed = 0;
+    while (
+      this.index < this.data.length - 1 &&
+      processed < this.MAX_CANDLES_PER_FRAME &&
+      (processed === 0 || performance.now() - t0 < budgetMs)
+    ) {
+      this._processCandle(false);   // render only once, after the batch — see below
+      this.index++;
+      processed++;
+    }
 
     const pct = ((this.index - 100) / (this.data.length - 100)) * 100;
     const spd = `${this.speed}×`;
     setBtProgress(Math.min(99, 40 + pct * 0.57),
       `Replaying… ${this.index.toLocaleString()} / ${this.data.length.toLocaleString()} · ${this.positions.length} open · ${this.trades.length} closed · ${spd}`);
-    // Force chart render immediately
     if (this.index < this.data.length) {
       this._renderFrame();
     }
@@ -7037,7 +7129,8 @@ const replay = {
       let simHigh = current.open;
       let simLow  = current.open;
 
-      for (const price of pricePath) {
+      for (let tickIdx = 0; tickIdx < pricePath.length; tickIdx++) {
+        const price = pricePath[tickIdx];
         if (this.positions.length) break;
 
         // ── Forming M1: only prices reached so far ──
@@ -7077,7 +7170,7 @@ const replay = {
         candles[900] = [...completedM15, formingM15];
         mid = price;
 
-        this._evaluateEntry(currentEpoch, price);
+        this._evaluateEntry(currentEpoch, price, pricePath, tickIdx);
       }
     }
 
@@ -7179,6 +7272,7 @@ const replay = {
           lotMult: +(pos.lotMult || 1).toFixed(2),
           dynSpread: +(pos.dynSpread || 0).toFixed(2),
           slip: +(pos.slip || 0).toFixed(2),
+          execDelayMs: pos.execDelayMs || 0,
         });
       }
     });
@@ -7332,6 +7426,7 @@ const replay = {
         lotMult: +(pos.lotMult || 1).toFixed(2),
         dynSpread: +(pos.dynSpread || 0).toFixed(2),
         slip: +(pos.slip || 0).toFixed(2),
+        execDelayMs: pos.execDelayMs || 0,
       });
       const ov = $('flashOverlay');
       ov.className = `flash-overlay ${pnl >= 0 ? 'buy' : 'sell'}-flash`;
@@ -7339,7 +7434,7 @@ const replay = {
     });
   },
 
-  _evaluateEntry(epoch, price) {
+  _evaluateEntry(epoch, price, pricePath, tickIdx) {
     // ── Warm-up guard: require ≥ 80 completed M1 bars (mirrors live runStrategy guard) ──
     // candles[60] at this point contains completedM1 + formingM1, so length equals
     // number of completed bars + 1. We need at least 80 completed bars.
@@ -7402,25 +7497,55 @@ const replay = {
         addSignal('info', `BT ${ns.state} [${ns.event}]${noteStr} — trading with lots×${ns.lotMult.toFixed(2)}`, null);
       }
       this.replayLastSigEpoch = epoch;
-      this._openReplayPosition(sig, epoch, price);
+      this._openReplayPosition(sig, epoch, price, pricePath, tickIdx);
     }
   },
 
-  _openReplayPosition(sig, epoch, price) {
+  _openReplayPosition(sig, epoch, price, pricePath, tickIdx) {
     const isBuy = sig.dir === 'UP';
 
-    // ── News state at this candle's epoch ──
-    const ns = btNewsStateAt(epoch, this.newsEvents || []);
+    // ── EXECUTION DELAY — the live path (_executeDemoTrade) genuinely waits
+    // getExecDelay() milliseconds via setTimeout before pricing the fill, so
+    // whatever the market did during that queue time is already baked into
+    // the entry. Backtest had no wall clock, so it filled instantly on the
+    // signal tick — a real gap versus live, and the one place the file's own
+    // "BACKTEST ≡ LIVE" manifest (item ⑨) overstated what the code did.
+    // Fix: simulate the wait by walking forward along this bar's own
+    // intrabar tick path by the equivalent number of steps, and price/news
+    // conditions are re-sampled at that later point, not at signal time.
+    // A 50–350ms delay is tiny next to a 60s bar (each path step covers
+    // ~15s), so most fills still land on the same or next tick step — which
+    // is the realistic outcome — but it re-samples correctly whenever the
+    // delay does cross a step or a PRE_RELEASE spread-spike boundary.
+    const preDelayNs = btNewsStateAt(epoch, this.newsEvents || []);
+    const execDelayMs = getExecDelay(preDelayNs.state);
+    let fillPrice = price, fillEpoch = epoch;
+    if (Array.isArray(pricePath) && pricePath.length > 1 && Number.isInteger(tickIdx)) {
+      const stepMs = 60000 / (pricePath.length - 1);
+      const stepsForward = Math.round(execDelayMs / stepMs);
+      const fillIdx = Math.min(pricePath.length - 1, tickIdx + stepsForward);
+      fillPrice = pricePath[fillIdx];
+    }
+    fillEpoch = epoch + execDelayMs / 1000;
 
-    // ── Dynamic spread ──
-    const dynSpread = getDynamicSpread(epoch, ns.state);
+    // ── News state re-sampled at fill time, not signal time ──
+    const ns = btNewsStateAt(fillEpoch, this.newsEvents || []);
 
-    // ── Slippage ──
-    const slip = getSlippage(isBuy);
+    // ── Dynamic spread at fill time ──
+    const dynSpread = getDynamicSpread(fillEpoch, ns.state);
+
+    // ── Slippage — scaled by order-size regime (balance growth, same proxy
+    // used live) and current volatility, not a flat draw. This is what
+    // actually keeps execution cost honest as the account compounds and
+    // position size grows — a fixed $0–4 draw was identical whether the
+    // account was risking $1 or $10,000 per trade. ──
+    const growthSlip = accountGrowthSlipFactor(this.replayBal, this.replayStartBal);
+    const volSlip = slippageVolFactor();
+    const slip = getSlippage(isBuy, growthSlip, volSlip);
 
     const entryPrice = +(isBuy
-      ? price + dynSpread / 2 + slip
-      : price - dynSpread / 2 + slip).toFixed(2);
+      ? fillPrice + dynSpread / 2 + slip
+      : fillPrice - dynSpread / 2 + slip).toFixed(2);
 
     // ── SL/TP GEOMETRY — mirrors _executeDemoTrade: prefer real setup
     // geometry, fall back to the old fixed-buffer/ATR logic. ──
@@ -7482,6 +7607,7 @@ const replay = {
       lotMult: ns.lotMult,
       dynSpread,
       slip,
+      execDelayMs,
       slDist,
       consecLossAtEntry: this.replayConsecLoss,
       consecWinAtEntry: this.replayConsecWin,
@@ -7561,7 +7687,7 @@ const replay = {
 
   _finish() {
     this.active = false;
-    clearTimeout(this.timer);
+    cancelAnimationFrame(this.timer);
     // ── Aggregate stats for multi-run analysis ──
     const closedTrades = this.trades;
     const pfNum = closedTrades.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
