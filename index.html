@@ -1486,6 +1486,44 @@ function calcPnLForPos(pos, currentMid) {
   return delta * (pos.posUnits || pos.lots * CONTRACT_SIZE || 1);
 }
 
+// ── UNIFIED CLOSE PnL (TP / SL / BE / TRAIL — live & backtest) ──
+// BUG FIX: exits used to mix two different accounting methods — TP paid out
+// a fixed pos.tpAmount, and a true (unmoved) SL paid out a fixed
+// -pos.slAmount, while BE/TRAIL exits were computed from the *actual*
+// slPrice × posUnits. Those preset tpAmount/slAmount figures are only
+// correct if `lots` came out exactly at the risk-sized value — but lots
+// gets floored/capped by CFG.MIN_LOT_SIZE / CFG.MAX_LOT_CAP, and rounded to
+// 2 decimals, so the preset dollar figure silently drifted away from what
+// the position's real size actually pays out at that exit price. That drift
+// is why closed trades could show PnL figures that didn't match
+// entry/exit/lots. Every exit type now derives PnL the same way, from the
+// real exit price and the position's real unit size, so the logged number
+// always matches what actually happened.
+function calcClosePnL(pos, exitPrice) {
+  const isBuy = pos.dir === 'UP' || pos.dir === 'BUY';
+  const units = pos.posUnits || (pos.lots || 0) * CONTRACT_SIZE || 0;
+  return (isBuy ? (exitPrice - pos.entry) : (pos.entry - exitPrice)) * units;
+}
+
+// ── RUNNER-MODE SAFETY GATE ──
+// BUG FIX: Phase-3 "runner mode" used to disable the hard TP unconditionally
+// the moment trailPhase reached 3, even though the phase-3 trail distance
+// (60% giveback from current price) is almost always WIDER than the gap
+// between the phase-2 and phase-3 trigger thresholds. That meant the SL that
+// was already ratcheted in phase 2 was typically tighter (better) than the
+// freshly-computed phase-3 candidate, so the trailing stop sat far behind
+// price — letting price sail straight through the original TP with nothing
+// to close the trade until a large chunk of the move gave back. This is
+// exactly the "TP never triggers, price runs past it" symptom.
+// Fix: only let the trade run past its own TP once the trailing stop has
+// already locked in a price at least as good as TP would have paid — i.e.
+// the runner is provably never worse than just taking TP. Otherwise the
+// hard TP still fires the instant price reaches it, same as any other trade.
+function tpAlreadyGuaranteed(pos) {
+  const isBuy = pos.dir === 'UP' || pos.dir === 'BUY';
+  return isBuy ? pos.slPrice >= pos.tpPrice : pos.slPrice <= pos.tpPrice;
+}
+
 // ── VOLATILITY ENGINE (ported from Python calculate_volatility) ──
 // Returns mean bar range over the last 20 completed M5 candles.
 // Used by detectMarketRegime() and as a reference for regime classification.
@@ -1711,8 +1749,28 @@ const REFINED_STRATEGY_CFG = {
     // "SWEEP", "OB", "STRUCTURE", or "HYBRID"
     slReference: "HYBRID",
 
-    slBufferATR: 0.05,
-    maxSLPoints: 6.0,
+    // Extra room beyond the structural SL reference so an exact wick-retest
+    // of that level doesn't immediately tag the stop. Was 0.05 (barely any
+    // cushion) — raised to give the stop a little breathing room without
+    // meaningfully widening risk.
+    slBufferATR: 0.20,
+
+    // BUG FIX — the root cause of the bot's low win rate: this was a flat
+    // $6 cap on SL distance. That number makes sense for a much
+    // lower-priced/tighter-tick instrument, but on BTCUSD (~$100k+ price)
+    // $6 sits well inside ordinary tick/spread noise. It was silently
+    // overriding the real structural stop computed above (HYBRID reference
+    // off the actual swept range/order block, often $30-150+ on BTC) down
+    // to a noise-level distance — so trades were routinely stopped out by
+    // normal wiggle immediately after entry, never by the setup actually
+    // being invalidated. That's why ~60% of trades hit SL and almost none
+    // hit the original TP. Replaced with an ATR-relative cap (maxSLATRMult)
+    // so the stop self-scales with BTC's *current* volatility instead of a
+    // stale hardcoded dollar figure. maxSLPoints is kept only as a fallback
+    // for the rare case ATR is unavailable, and raised to a realistic BTC
+    // figure to match.
+    maxSLATRMult: 3.0,      // hard SL cap = 3x current M1 ATR
+    maxSLPoints: 150.0,     // fallback cap only (ATR-unavailable case) — was 6.0
     minSLPoints: 0.50,
 
     // Maximum acceptable target obstruction.
@@ -3019,8 +3077,15 @@ const RefinedStrategy = (() => {
 
     let slDistance = Math.abs(entryPrice - slPrice);
 
-    if (slDistance > C.trade.maxSLPoints) {
-      slDistance = C.trade.maxSLPoints;
+    // ATR-relative cap (falls back to the flat maxSLPoints only if ATR is
+    // unavailable) — see trade.maxSLATRMult comment above for why this
+    // replaced the old flat $6 cap.
+    const maxSLDistance = currentATR > 0
+      ? currentATR * C.trade.maxSLATRMult
+      : C.trade.maxSLPoints;
+
+    if (slDistance > maxSLDistance) {
+      slDistance = maxSLDistance;
       slPrice = isBuy
         ? entryPrice - slDistance
         : entryPrice + slDistance;
@@ -3907,8 +3972,28 @@ function miniBacktest(m1All, m5All, opts = {}) {
       const barsOpen = i - openTrade.openIndex;
 
       if (hitSL || hitTP || barsOpen >= maxHoldBars) {
-        const outcome = hitTP ? "WIN" : hitSL ? "LOSS" : "TIME_EXIT";
-        const rMultiple = hitTP ? openTrade.rr : hitSL ? -1 : 0;
+        // BUG FIX ("candle smash"): when a single bar's range spans BOTH
+        // the SL and TP, OHLC alone can't tell you which was actually hit
+        // first — but this used to always resolve to TP ("hitTP ? WIN :
+        // ..."), an optimistic look-ahead bias that silently inflated the
+        // win rate on every wide bar. Resolve it the same way the main
+        // replay engine does: assume a bull bar travels
+        // open → low → high → close and a bear bar open → high → low →
+        // close, then honor whichever level that realistic path reaches
+        // first.
+        let outcome, rMultiple;
+        if (hitSL && hitTP) {
+          const isBullBar = bar.close >= bar.open;
+          const slFirst = openTrade.direction === "BUY" ? isBullBar : !isBullBar;
+          outcome = slFirst ? "LOSS" : "WIN";
+          rMultiple = slFirst ? -1 : openTrade.rr;
+        } else if (hitTP) {
+          outcome = "WIN"; rMultiple = openTrade.rr;
+        } else if (hitSL) {
+          outcome = "LOSS"; rMultiple = -1;
+        } else {
+          outcome = "TIME_EXIT"; rMultiple = 0;
+        }
         trades.push({ ...openTrade, outcome, rMultiple, closeIndex: i, closeEpoch: bar.epoch });
         openTrade = null;
       }
@@ -5611,9 +5696,23 @@ function checkDemoPositions() {
     // (price may be ratcheted at max already, but label/colour still needs updating)
     if(trail.phase >= 1) pos.beTriggered = true;   // gold SL line, "BE" label
     if(trail.phase >= 2) pos.trailActive = true;   // "TRAIL · SL" label
+    // BUG FIX: trailPhase used to only advance INSIDE the `newSL changed`
+    // branch below. But the ratchet (Math.max/Math.min against the existing
+    // SL) can legitimately compute a phase-3 candidate that is LESS
+    // favorable than the SL already locked in phase 2 (the phase-2→3
+    // trigger gap is normally smaller than the jump from a 40% to a 60%
+    // giveback distance) — the ratchet correctly refuses to move price
+    // backward, so newSL === pos.slPrice and the old code silently skipped
+    // updating trailPhase too. That left trades stuck reporting "BE" or
+    // "TRAIL"(phase 2) forever even after real progress reached phase 3,
+    // which mislabeled closed trades and stopped runner mode from ever
+    // engaging correctly. The phase number must always track forward
+    // independently of whether the SL price itself moved this tick.
+    if(trail.phase > (pos.trailPhase || 0)) {
+      pos.trailPhase = trail.phase;
+    }
     if(trail.newSL !== pos.slPrice) {
       pos.slPrice = trail.newSL;
-      pos.trailPhase = trail.phase;
       pos.slAmount = 0; // BE+ territory
       if(trail.trailInfo) {
         addSignal('info', `#${pos.id} ${pos.dir==='UP'?'BUY':'SELL'} ${trail.trailInfo} (${trail.pctToTP}% to TP)`, mid);
@@ -5698,13 +5797,26 @@ function checkDemoPositions() {
   demoPositions.forEach(pos => {
     if(closeData.find(c => c.pos.id === pos.id)) return; // already queued by TIME_EXIT
     const isBuy = pos.dir === 'UP';
-    const runnerMode = (pos.trailPhase || 0) >= 3;
+    // Runner mode only suppresses the hard TP once the trailing SL is
+    // already guaranteed to pay out at least as much as TP would have —
+    // see tpAlreadyGuaranteed() above. Otherwise TP always fires on touch.
+    const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
     if(isBuy) {
-      if(mid <= pos.slPrice) closeData.push({pos, pnl: (pos.trailPhase||0) >= 1 ? Math.max(0,(pos.slPrice-pos.entry)*pos.posUnits) : -(pos.slAmount), reason: (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL'});
-      else if(!runnerMode && mid >= pos.tpPrice) closeData.push({pos, pnl: pos.tpAmount, reason: 'TP'});
+      if(mid <= pos.slPrice) {
+        const raw = calcClosePnL(pos, pos.slPrice);
+        const pnl = (pos.trailPhase||0) >= 1 ? Math.max(0, raw) : raw;
+        closeData.push({pos, pnl, reason: (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL'});
+      } else if(!runnerMode && mid >= pos.tpPrice) {
+        closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP'});
+      }
     } else {
-      if(mid >= pos.slPrice) closeData.push({pos, pnl: (pos.trailPhase||0) >= 1 ? Math.max(0,(pos.entry-pos.slPrice)*pos.posUnits) : -(pos.slAmount), reason: (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL'});
-      else if(!runnerMode && mid <= pos.tpPrice) closeData.push({pos, pnl: pos.tpAmount, reason: 'TP'});
+      if(mid >= pos.slPrice) {
+        const raw = calcClosePnL(pos, pos.slPrice);
+        const pnl = (pos.trailPhase||0) >= 1 ? Math.max(0, raw) : raw;
+        closeData.push({pos, pnl, reason: (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL'});
+      } else if(!runnerMode && mid <= pos.tpPrice) {
+        closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP'});
+      }
     }
   });
 
@@ -6931,36 +7043,45 @@ const replay = {
           if (trail) {
             if(trail.phase >= 1) pos.beTriggered = true;
             if(trail.phase >= 2) pos.trailActive = true;
-            if(trail.newSL !== pos.slPrice) {
-              pos.slPrice    = trail.newSL;
+            // BUG FIX: same phase-sync issue as live mode (see
+            // checkDemoPositions) — the ratchet can hold the SL price
+            // unchanged while the phase number still legitimately advances
+            // (e.g. 2 → 3). Sync the phase independently of whether the SL
+            // price itself moved this step, or backtest trades get the same
+            // wrong BE/TRAIL mislabeling and stuck-out-of-runner-mode bug
+            // that live mode had.
+            if (trail.phase > (pos.trailPhase || 0)) {
               pos.trailPhase = trail.phase;
-              pos.slAmount   = 0;
+            }
+            if(trail.newSL !== pos.slPrice) {
+              pos.slPrice  = trail.newSL;
+              pos.slAmount = 0;
             }
           }
         }
 
         // ── SL then TP hit check against the raw path price ──────────────
-        // Runner mode: Phase 3 disables the hard TP close (see live-path
-        // comment in checkDemoPositions) so trending backtest trades get the
-        // same chance to run past their original target as live trades do.
-        const runnerMode = (pos.trailPhase || 0) >= 3;
+        // Runner mode: Phase 3 only disables the hard TP close once the
+        // trailing SL is already guaranteed to pay out at least as much as
+        // TP would have (tpAlreadyGuaranteed) — matches the live-path fix
+        // in checkDemoPositions, so backtest and live make identical exit
+        // decisions given identical price paths.
+        const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
         if (isBuy) {
           if (price <= pos.slPrice) {
-            const pnl = (pos.trailPhase || 0) >= 1
-              ? Math.max(0, (pos.slPrice - pos.entry) * (pos.posUnits || pos.lots * CONTRACT_SIZE || 1))
-              : -(pos.slAmount || 0);
+            const raw = calcClosePnL(pos, pos.slPrice);
+            const pnl = (pos.trailPhase || 0) >= 1 ? Math.max(0, raw) : raw;
             closed = { pnl, reason: (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL' };
           } else if (!runnerMode && price >= pos.tpPrice) {
-            closed = { pnl: pos.tpAmount, reason: 'TP' };
+            closed = { pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP' };
           }
         } else {
           if (price >= pos.slPrice) {
-            const pnl = (pos.trailPhase || 0) >= 1
-              ? Math.max(0, (pos.entry - pos.slPrice) * (pos.posUnits || pos.lots * CONTRACT_SIZE || 1))
-              : -(pos.slAmount || 0);
+            const raw = calcClosePnL(pos, pos.slPrice);
+            const pnl = (pos.trailPhase || 0) >= 1 ? Math.max(0, raw) : raw;
             closed = { pnl, reason: (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL' };
           } else if (!runnerMode && price <= pos.tpPrice) {
-            closed = { pnl: pos.tpAmount, reason: 'TP' };
+            closed = { pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP' };
           }
         }
       }
@@ -8017,34 +8138,63 @@ function _scanGapPositions() {
   demoPositions.forEach(pos => {
     if (closeData.find(c => c.pos.id === pos.id)) return; // already closing
     const isBuy = pos.dir === 'UP';
+    // BUG FIX: this used to check each gap bar's raw high/low against a
+    // trailPhase/slPrice that was never advanced across the gap — so a
+    // trail that should have ratcheted forward (or reached runner mode)
+    // over several missed bars stayed frozen at its pre-gap level, and SL
+    // hits paid out the same stale -pos.slAmount / pos.tpAmount figures
+    // that live SL/TP checks no longer use. Walk the gap bars in order,
+    // updating the trail and checking hits with the same realistic
+    // intrabar path + unified PnL logic used everywhere else, so a
+    // background gap is resolved exactly like live mode would have
+    // resolved it tick-by-tick.
     for (const bar of gapBars) {
-      // For a BUY: worst case = bar LOW. For a SELL: worst case = bar HIGH.
-      // Check SL first (pessimistic, matching the existing same-bar SL-before-TP rule).
-      if (isBuy) {
-        if (bar.low <= pos.slPrice) {
-          const ph = pos.trailPhase || 0;
-          const pnl = ph >= 1 ? Math.max(0, (pos.slPrice - pos.entry) * pos.posUnits) : -(pos.slAmount);
-          const reason = ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL';
-          closeData.push({ pos, pnl, reason, atPrice: pos.slPrice });
-          break;
+      if (closeData.find(c => c.pos.id === pos.id)) break;
+      const isBullBar = bar.close >= bar.open;
+      const path = isBullBar
+        ? [bar.open, bar.low, bar.high, bar.close]
+        : [bar.open, bar.high, bar.low, bar.close];
+      let pathHigh = bar.open, pathLow = bar.open;
+      pos._curEpoch = bar.epoch;
+      for (const price of path) {
+        if (price > pathHigh) pathHigh = price;
+        if (price < pathLow)  pathLow  = price;
+        if (CFG.TRAIL_ENABLED) {
+          const trail = updateThreePhaseTrail(pos, isBuy ? pathHigh : pathLow);
+          if (trail) {
+            if (trail.phase >= 1) pos.beTriggered = true;
+            if (trail.phase >= 2) pos.trailActive = true;
+            if (trail.phase > (pos.trailPhase || 0)) pos.trailPhase = trail.phase;
+            if (trail.newSL !== pos.slPrice) { pos.slPrice = trail.newSL; pos.slAmount = 0; }
+          }
         }
-        if (bar.high >= pos.tpPrice) {
-          closeData.push({ pos, pnl: pos.tpAmount, reason: 'TP', atPrice: pos.tpPrice });
-          break;
-        }
-      } else {
-        if (bar.high >= pos.slPrice) {
-          const ph = pos.trailPhase || 0;
-          const pnl = ph >= 1 ? Math.max(0, (pos.entry - pos.slPrice) * pos.posUnits) : -(pos.slAmount);
-          const reason = ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL';
-          closeData.push({ pos, pnl, reason, atPrice: pos.slPrice });
-          break;
-        }
-        if (bar.low <= pos.tpPrice) {
-          closeData.push({ pos, pnl: pos.tpAmount, reason: 'TP', atPrice: pos.tpPrice });
-          break;
+        const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
+        const ph = pos.trailPhase || 0;
+        if (isBuy) {
+          if (price <= pos.slPrice) {
+            const raw = calcClosePnL(pos, pos.slPrice);
+            const pnl = ph >= 1 ? Math.max(0, raw) : raw;
+            closeData.push({ pos, pnl, reason: ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL', atPrice: pos.slPrice });
+            break;
+          }
+          if (!runnerMode && price >= pos.tpPrice) {
+            closeData.push({ pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP', atPrice: pos.tpPrice });
+            break;
+          }
+        } else {
+          if (price >= pos.slPrice) {
+            const raw = calcClosePnL(pos, pos.slPrice);
+            const pnl = ph >= 1 ? Math.max(0, raw) : raw;
+            closeData.push({ pos, pnl, reason: ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL', atPrice: pos.slPrice });
+            break;
+          }
+          if (!runnerMode && price <= pos.tpPrice) {
+            closeData.push({ pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP', atPrice: pos.tpPrice });
+            break;
+          }
         }
       }
+      if (closeData.find(c => c.pos.id === pos.id)) break;
     }
   });
 
