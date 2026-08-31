@@ -1118,6 +1118,14 @@ input[type=range]::-webkit-slider-thumb{
         </div>
         <div class="field-hint">Bot stops early when this gain is reached. Uses current Risk %, RR, and Max DD settings.</div>
       </div>
+      <div class="field">
+        <label>Seed <span style="opacity:.6;font-weight:400">(reproducibility)</span></label>
+        <div class="field-row">
+          <input class="finput" type="number" id="btSeed" placeholder="blank = random" min="1" step="1"/>
+          <button type="button" class="btn" id="btSeedRandomizeBtn" onclick="$('btSeed').value = Math.floor(Math.random()*2147483647)" style="white-space:nowrap">🎲 New</button>
+        </div>
+        <div class="field-hint">Fills the SAME simulated spread/slippage/delay draws every run when set. Same seed + same settings above = identical trade log every time — leave blank for a fresh (random) draw each run, or fix a seed to reproduce a result, or run several different seeds back-to-back to see the spread of outcomes instead of trusting one run.</div>
+      </div>
     </div>
     <button class="btn btn-gold" id="btRunBtn" onclick="startBacktest()" disabled>▶ Run Backtest</button>
     <button class="bt-cancel-btn" id="btCancelBtn" onclick="cancelBacktest()">■ Cancel</button>
@@ -1453,6 +1461,46 @@ const SIM = {
   DELAY_MAX          : 120,
 };
 
+// ── SEEDED PRNG — deterministic backtest randomness ──────────────────────
+// PROBLEM THIS FIXES: getDynamicSpread/getSlippage/getExitSlippage/
+// getExecDelay below all drew from Math.random(). That's correct for LIVE
+// trading (real fills are genuinely unpredictable) but wrong for a
+// "backtest" — every one of those draws changes the entry/exit price by a
+// few cents, which changes whether a trade is a few cents from tipping into
+// TP/SL, which cascades into a different trade sequence entirely. Result:
+// running the exact same config (same date range, balance, risk%, target)
+// twice produced trade counts and PnL that differed by 30-50%+, which means
+// no single backtest run was a trustworthy read on the strategy — you were
+// unknowingly sampling from a wide, unlabeled distribution of outcomes.
+// FIX: a small deterministic PRNG (mulberry32) seeded once per backtest run.
+// Same seed + same settings now ALWAYS replays the identical trade
+// sequence. RNG.rand() is a drop-in Math.random() replacement — seeded
+// while a backtest is active, real Math.random() everywhere else (live/demo
+// mode is never seeded, since real execution should stay unpredictable).
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const RNG = {
+  seeded: false,
+  seed: 0,
+  _next: null,
+  init(seed) {
+    this.seed = (seed >>> 0) || 1;
+    this._next = mulberry32(this.seed);
+    this.seeded = true;
+  },
+  stop() { this.seeded = false; this._next = null; },
+  // Drop-in for Math.random(): seeded+reproducible during backtest replay,
+  // genuinely random during live/demo trading.
+  rand() { return (this.seeded && this._next) ? this._next() : Math.random(); },
+};
+
 // ── DYNAMIC SPREAD — Exness Raw Spread BTCUSD session profile ──
 // Placeholder session shape calibrated to a tight Raw-Spread-style baseline
 // — replace with real BTCUSD spread data pulled from your live Exness feed
@@ -1467,14 +1515,14 @@ function getDynamicSpread(epochSec, newsState) {
   let spread;
 
   // Session-based spread — Exness Raw Spread BTCUSD calibration
-  if      (hour >= 0  && hour < 3 ) spread = 7  + Math.random() * 3;   // dead Asian (00-03): $7–10
-  else if (hour >= 3  && hour < 6 ) spread = 6  + Math.random() * 2;   // late Asian (03-06): $6–8
-  else if (hour >= 6  && hour < 7 ) spread = 5  + Math.random() * 2;   // pre-London (06-07): $5–7
-  else if (hour >= 7  && hour < 9 ) spread = 3.5+ Math.random() * 1;   // London open (07-09): $3.5–4.5
-  else if (hour >= 9  && hour < 13) spread = 4  + Math.random() * 1;   // London mid  (09-13): $4–5
-  else if (hour >= 13 && hour < 15) spread = 2.5+ Math.random() * 1.5; // NY/LON overlap tightest: $2.5–4
-  else if (hour >= 15 && hour < 20) spread = 4.5+ Math.random() * 1.5; // NY afternoon (15-20): $4.5–6
-  else                               spread = 6  + Math.random() * 2;  // late NY (20-00): $6–8
+  if      (hour >= 0  && hour < 3 ) spread = 7  + RNG.rand() * 3;   // dead Asian (00-03): $7–10
+  else if (hour >= 3  && hour < 6 ) spread = 6  + RNG.rand() * 2;   // late Asian (03-06): $6–8
+  else if (hour >= 6  && hour < 7 ) spread = 5  + RNG.rand() * 2;   // pre-London (06-07): $5–7
+  else if (hour >= 7  && hour < 9 ) spread = 3.5+ RNG.rand() * 1;   // London open (07-09): $3.5–4.5
+  else if (hour >= 9  && hour < 13) spread = 4  + RNG.rand() * 1;   // London mid  (09-13): $4–5
+  else if (hour >= 13 && hour < 15) spread = 2.5+ RNG.rand() * 1.5; // NY/LON overlap tightest: $2.5–4
+  else if (hour >= 15 && hour < 20) spread = 4.5+ RNG.rand() * 1.5; // NY afternoon (15-20): $4.5–6
+  else                               spread = 6  + RNG.rand() * 2;  // late NY (20-00): $6–8
 
   // Volatility widening
   const m1 = candles[60];
@@ -1532,10 +1580,10 @@ function getLiveSpread(newsState) {
 //                (recent ATR), since thin/fast books slip more than calm ones.
 function getSlippage(isBuy, sizeFactor = 1, volMult = 1) {
   // 70% chance of zero or trivial slippage, 30% chance of minor slippage
-  const r = Math.random();
+  const r = RNG.rand();
   const basePts = r < 0.70
-    ? Math.random() * 1                                       // near-zero fill
-    : SIM.SLIP_MIN + Math.random() * (SIM.SLIP_MAX - SIM.SLIP_MIN); // $0–3 (Exness tier-1 liquidity)
+    ? RNG.rand() * 1                                       // near-zero fill
+    : SIM.SLIP_MIN + RNG.rand() * (SIM.SLIP_MAX - SIM.SLIP_MIN); // $0–3 (Exness tier-1 liquidity)
   const pts = basePts * Math.max(1, sizeFactor) * Math.max(1, volMult);
   return isBuy ? pts : -pts;  // buy fills slightly higher, sell slightly lower
 }
@@ -1592,8 +1640,8 @@ function getExitSlippage(isBuy, reason) {
   if (reason === 'TP') return 0;
   const volMult = slippageVolFactor();
   // 65% chance of a small slip, 35% chance of a larger one on a fast move
-  const r = Math.random();
-  const basePts = r < 0.65 ? Math.random() * 1.2 : 1.2 + Math.random() * 3.3;
+  const r = RNG.rand();
+  const basePts = r < 0.65 ? RNG.rand() * 1.2 : 1.2 + RNG.rand() * 3.3;
   const pts = basePts * volMult;
   // Adverse only: a BUY's stop sells lower than requested, a SELL's stop
   // buys higher than requested — never in the position's favor.
@@ -1612,8 +1660,8 @@ function getExitSlippage(isBuy, reason) {
 // signal still fires and fills, just avoids the worst instant of the spread
 // widening. No effect outside PRE_RELEASE.
 function getExecDelay(newsState) {
-  const base = SIM.DELAY_MIN + Math.floor(Math.random() * (SIM.DELAY_MAX - SIM.DELAY_MIN));
-  if (newsState === 'PRE_RELEASE') return base + 150 + Math.floor(Math.random() * 150);
+  const base = SIM.DELAY_MIN + Math.floor(RNG.rand() * (SIM.DELAY_MAX - SIM.DELAY_MIN));
+  if (newsState === 'PRE_RELEASE') return base + 150 + Math.floor(RNG.rand() * 150);
   return base;
 }
 
@@ -6861,9 +6909,15 @@ function checkRiskOverflow(slDist, quality, useBalance, opts) {
   let lots = Math.max(CFG.MIN_LOT_SIZE, Math.min(CFG.MAX_LOT_CAP, +rawLots.toFixed(2)));
 
   // ── Free-margin guard ──
-  // Only runs when the caller supplies live position/price state (live/demo
-  // open). Backtest doesn't track margin per-position today, so it's skipped
-  // there rather than guessed at — same as before this fix, no regression.
+  // Runs here for any live/demo caller that supplies position/price state.
+  // Backtest applies the identical formula itself, locally, right after
+  // this function returns (see the "FREE-MARGIN GUARD (backtest)" block in
+  // the replay entry function) — it can't be done in here because backtest
+  // layers its own risk-% adjustments (news lot multiplier, risk-halving)
+  // on top of riskCheck.riskPct before it knows the final `lots` to check
+  // margin against, so this block would be checking the wrong number if it
+  // ran first. Both paths use the same SAFETY.MIN_MARGIN_PCT / CFG.LEVERAGE
+  // math, so live and backtest are margin-guarded equivalently either way.
   if (opts.usePositions && opts.useMid) {
     const floatingPnl = opts.usePositions.reduce((s,p) => s + calcPnLForPos(p, opts.useMid), 0);
     const equity = bal + floatingPnl;
@@ -7382,8 +7436,17 @@ const replay = {
   // position sizing, risk calc, margin, or trade calculations — checkRiskOverflow()
   // is only ever passed this.replayBal (see _evaluateEntry below), never this + vault.
 
-  start(m1All, m5All, startBal, profitTarget, newsEvents) {
+  start(m1All, m5All, startBal, profitTarget, newsEvents, seed) {
     if (this.active) this.stop();
+    // Seed the deterministic RNG for this run. Same seed + same settings =
+    // same trade sequence, every time. If no seed was supplied, derive one
+    // from the current clock so every "Run Backtest" click without an
+    // explicit seed still behaves as before (varies run to run) — but now
+    // the seed actually used is recorded (this.lastSeed) so a result can be
+    // reproduced later by typing that seed back into the Seed field.
+    const usedSeed = (seed && seed > 0) ? Math.floor(seed) : Math.floor(Date.now() % 2147483647);
+    this.lastSeed = usedSeed;
+    RNG.init(usedSeed);
     this.data = m1All.map(c => ({...c}));
     this.m5Data = m5All.map(c => ({...c}));
     // Derive M15 data from M5 data (aggregate every 3 M5 candles)
@@ -7475,6 +7538,7 @@ const replay = {
       mid = this.liveSnapshot.mid;
     }
     strategy._btEpoch = null;
+    RNG.stop(); // back to genuine Math.random() for live/demo mode
     this._exitReplayMode();
     addSignal('info', 'Replay stopped — returned to live data', null);
   },
@@ -8185,6 +8249,30 @@ const replay = {
     let lots = +(rawRisk / (slDist * CONTRACT_SIZE)).toFixed(2);
     lots = Math.max(CFG.MIN_LOT_SIZE, Math.min(CFG.MAX_LOT_CAP, lots));
 
+    // ── FREE-MARGIN GUARD (backtest) ──
+    // GAP FIX: checkRiskOverflow()'s own "Free-margin guard" block only ran
+    // when the caller passed useMid, which the backtest call above never
+    // did — so backtest could size a trade to whatever the risk-% math
+    // called for (up to the 200-lot cap) with zero regard for whether the
+    // account actually had the margin to support it. A real broker would
+    // reject or shrink an order it doesn't have margin for; the backtest
+    // was silently letting every trade through regardless. Mirrors the
+    // exact same formula checkRiskOverflow uses for live/demo, now that
+    // backtest positions carry a `margin` field (see pos.margin below) to
+    // sum against, the way demoPositions already did.
+    {
+      const floatingPnl = this.positions.reduce((s, p) => s + calcPnLForPos(p, entryPrice), 0);
+      const equity = this.replayBal + floatingPnl;
+      const usedMargin = this.positions.reduce((s, p) => s + (p.margin || 0), 0);
+      const freeMgn = equity - usedMargin;
+      const reqMargin = (lots * CONTRACT_SIZE * entryPrice) / CFG.LEVERAGE;
+      if (freeMgn > 0 && reqMargin > freeMgn * (SAFETY.MIN_MARGIN_PCT / 100)) {
+        const maxLots = Math.floor(((freeMgn * (SAFETY.MIN_MARGIN_PCT / 100) * CFG.LEVERAGE) / (CONTRACT_SIZE * entryPrice)) * 100) / 100;
+        lots = Math.max(0, Math.min(lots, maxLots));
+      }
+    }
+    if (lots < CFG.MIN_LOT_SIZE) return; // insufficient free margin — matches live's "insufficient free margin" guard, no trade taken
+
     // BUG FIX: the live open flow computes slAmount AFTER clamping lots
     // (slAmount = adjLots * CONTRACT_SIZE * slDist) — the backtest path used
     // to store the pre-clamp `rawRisk` figure instead, so once a run's
@@ -8206,6 +8294,9 @@ const replay = {
       id: ++this.replayPosIdCounter,
       dir: sig.dir, entry: entryPrice, lots, posUnits: lots * CONTRACT_SIZE,
       slPrice, tpPrice, slAmount: _openRisk, tpAmount,
+      // Margin actually reserved by this position — feeds the free-margin
+      // guard above for any position opened while this one is still open.
+      margin: (lots * CONTRACT_SIZE * entryPrice) / CFG.LEVERAGE,
       // BUG FIX: frozen copy of the initial $ risk — see live-open note for
       // why slAmount alone can't be trusted as the R-multiple denominator
       // once a trade has moved to BE/trail (it gets zeroed there).
@@ -8332,6 +8423,7 @@ const replay = {
       totalAccountValue: +(this.replayBal + (this.replayVault || 0)).toFixed(2),
       subsequentLockPct: CFG.SUBSEQUENT_LOCK_PCT,
       // ── Extended run summary ──
+      seed: this.lastSeed,
       runTimestamp: Date.now(),
       pnlTotal: +pnlTotal.toFixed(2),
       pnlPct: +((pnlTotal / this.replayStartBal) * 100).toFixed(2),
@@ -8666,7 +8758,9 @@ async function startBacktest() {
   const lowCount  = btNewsEvents.filter(e => e.impact === 'Low').length;
   addSignal('info', `News loaded: ${highCount} HIGH, ${medCount} MED, ${lowCount} LOW events`, null);
 
-  replay.start(m1All, m5All, startBal, profitTarget, btNewsEvents);
+  const seedInput = $('btSeed') && $('btSeed').value ? parseInt($('btSeed').value, 10) : 0;
+  replay.start(m1All, m5All, startBal, profitTarget, btNewsEvents, seedInput);
+  addSignal('info', `Backtest seed: ${replay.lastSeed} (re-enter this in the Seed field to reproduce this exact run)`, null);
 
   const checkCancel = setInterval(() => {
     if (btCancelled) {
@@ -8724,7 +8818,7 @@ function renderMultiRunTable() {
     const exitCol = `<span style="font-size:9px;color:var(--text2)">TP:${r.tpCount} SL:${r.slCount} BE:${r.beCount}</span>`;
     const holdCol = `<span style="color:var(--text)">${r.avgHoldBars}b</span>`;
     const ddCol   = `<span style="color:${r.maxDD>15?'var(--red)':r.maxDD>7?'var(--gold)':'var(--green)'}">${r.maxDD.toFixed(1)}%</span>`;
-    const setCol  = `<span style="color:var(--text3);font-size:8px">${r.settings.riskPct}%R ${r.settings.rr}RR</span>`;
+    const setCol  = `<span style="color:var(--text3);font-size:8px">${r.settings.riskPct}%R ${r.settings.rr}RR · seed ${r.seed ?? '—'}</span>`;
     const cells = [runNum, pnlCol, retCol, wrCol, pfCol, tradesCol, exitCol, holdCol, ddCol, setCol]
       .map(c => `<td style="padding:5px 6px;white-space:nowrap;font-size:10px;font-family:var(--mono);border-bottom:1px solid rgba(255,255,255,.02)">${c}</td>`).join('');
     return `<tr>${cells}</tr>`;
@@ -8758,6 +8852,7 @@ function btExportRuns() {
     beCount: r.beCount,
     trailCount: r.trailCount,
     newsCount: r.newsCount,
+    seed: r.seed,
     settings: r.settings,
     trades: r.trades,  // full trade log included
   }));
@@ -8821,6 +8916,10 @@ function renderBtResults(r) {
   const avgR = rTrades.length ? rTrades.reduce((s,t) => s + (t.pnl / (t.riskAmount || t.slAmount)), 0) / rTrades.length : 0;
 
   $('btResultGrid').innerHTML = `
+    <div class="bt-result-card" style="grid-column:1/-1">
+      <span class="bt-result-lbl">Seed used this run</span>
+      <span class="bt-result-val au" style="font-size:14px">${r.seed ?? '—'} <span style="color:var(--text3);font-weight:400;font-size:9px">— re-enter in the Seed field above to reproduce this exact trade sequence</span></span>
+    </div>
     <div class="bt-result-card">
       <span class="bt-result-lbl">Trading PnL</span>
       <span class="bt-result-val ${pnl>=0?'g':'r'}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
