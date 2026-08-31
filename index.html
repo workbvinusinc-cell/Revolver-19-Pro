@@ -733,9 +733,9 @@ input[type=range]::-webkit-slider-thumb{
         <label>Leverage</label>
         <div class="field-row">
           <span style="font-size:11px;color:var(--text2)">1 :</span>
-          <input class="finput" type="number" id="cfgLeverage" placeholder="20" min="1" max="500" step="1"/>
+          <input class="finput" type="number" id="cfgLeverage" placeholder="400" min="1" max="500" step="1"/>
         </div>
-        <div class="field-hint">Account leverage for BTCUSD. Controls required margin per trade — higher leverage allows larger positions on the same balance.</div>
+        <div class="field-hint">Account leverage for BTCUSD. Exness fixes BTCUSD margin at 0.25% (1:400) regardless of your account's forex leverage — controls required margin per trade.</div>
       </div>
       <div class="field">
         <label>Daily Profit Target</label>
@@ -834,10 +834,18 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>Max Spread Guard</label>
         <div class="field-row">
-          <input class="finput" type="number" id="cfgMaxSpread" placeholder="30" min="1" max="500" step="1"/>
+          <input class="finput" type="number" id="cfgMaxSpread" placeholder="20" min="1" max="500" step="1"/>
           <span class="funit">$</span>
         </div>
         <div class="field-hint">Live spread above this $ amount is flagged/blocked before entry — protects against bad fills during illiquid or volatile conditions.</div>
+      </div>
+      <div class="field">
+        <label>Commission / Lot</label>
+        <div class="field-row">
+          <input class="finput" type="number" id="cfgCommission" placeholder="4.0" min="0" max="100" step="0.1"/>
+          <span class="funit">$</span>
+        </div>
+        <div class="field-hint">Round-turn commission charged per lot on every close, on top of spread and slippage. Default $4 matches Exness BTCUSD Raw Spread ($2/side); use $8.75 for a Zero account. Set to 0 to disable.</div>
       </div>
       <div class="field">
         <label>Three-Phase Trailing Stop</label>
@@ -879,10 +887,11 @@ input[type=range]::-webkit-slider-thumb{
       </div>
       <div class="field">
         <div style="background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:9px 12px;font-size:9px;color:var(--text2);line-height:1.8">
-          <span style="color:var(--gold);font-family:var(--sans);font-size:9px;font-weight:700;display:block;margin-bottom:3px">BTCUSD · Binance BTCUSDT</span>
-          Spread: $6–$16 typical · Asian: ~$18 · NY/LON overlap: ~$6 · News spike: ~$33+ (placeholder calibration)<br>
-          Slippage: $0–$4 base, scaled up by order size and current volatility · Execution: 50–200 ms (simulated in both live and backtest fills) · Leverage and spread guard set above<br>
-          Data: Binance BTCUSDT WebSocket · lots adjust x0.60–x1.20 by news impact
+          <span style="color:var(--gold);font-family:var(--sans);font-size:9px;font-weight:700;display:block;margin-bottom:3px">BTCUSD · Exness Raw Spread calibration</span>
+          Spread: $2.5–$8 typical · Asian: ~$8 · NY/LON overlap: ~$3 · News spike: ~$18+ (Exness Raw Spread BTCUSD baseline)<br>
+          Slippage: $0–$3 base, scaled up by order size and current volatility · Execution: 20–120 ms (simulated in both live and backtest fills) · Commission $4/lot round turn (Raw Spread) · Leverage and spread guard set above<br>
+          Swap: -$15.48/lot/day long, $0 short, tripled Friday (live Exness BTCUSDm spec) — only applies if a trade is held across a daily rollover<br>
+          Data: Binance BTCUSDT WebSocket (price feed) · lots adjust x0.60–x1.20 by news impact
         </div>
       </div>
     </div>
@@ -1005,7 +1014,7 @@ input[type=range]::-webkit-slider-thumb{
     <div class="bt-summary-note">
       Replays your strategy on real historical BTCUSD data from Binance. Uses identical ICT/BMS rules, session filters, and risk management as live mode — no data advantage, no repainting. M5 HTF bias + M1 execution. Trades appear on chart during replay.<br><br>
       <span style="color:var(--gold);font-family:var(--sans);font-size:8px;font-weight:700;letter-spacing:.08em">MARKET SIMULATION ACTIVE:</span><br>
-      News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: $6–$16 typical, up to $33+ on news spikes | Slippage: $0–$4 base, scaled up by order size and volatility | Execution delay: 50–200 ms, simulated on every fill (was live-only — now applied in backtest too)
+      News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: $2.5–$8 typical, up to $18+ on news spikes (Exness Raw Spread BTCUSD) | Slippage: $0–$3 base, scaled up by order size and volatility | Execution delay: 20–120 ms, simulated on every fill | Commission: $4/lot round turn | Swap: -$15.48/lot/day long, tripled Friday (live Exness spec, only on trades held across rollover)
     </div>
     <div class="settings-section">
       <div class="settings-section-title">Date Range (DD-MM-YYYY)</div>
@@ -1034,6 +1043,14 @@ input[type=range]::-webkit-slider-thumb{
           <input class="finput" type="number" id="btStartBal" placeholder="e.g. 1000" min="1" step="100"/>
           <span class="funit">USD</span>
         </div>
+      </div>
+      <div class="field">
+        <label>Risk per Trade</label>
+        <div class="field-row">
+          <input class="finput" type="number" id="btRiskPct" placeholder="e.g. 1.0" min="0.1" max="5" step="0.1"/>
+          <span class="funit">%</span>
+        </div>
+        <div class="field-hint">% of balance staked per trade (0.1–5.0, same cap as the Config screen) — also updates the live Risk per Trade setting</div>
       </div>
       <div class="field">
         <label>Profit Target</label>
@@ -1085,13 +1102,13 @@ input[type=range]::-webkit-slider-thumb{
   <button id="rpStop">⏹ Stop</button>
   <input type="range" id="rpScrub" min="100" max="1000" value="100"/>
   <select id="rpSpeed">
-    <option value="0.12">0.12×</option>
-    <option value="1">1×</option>
-    <option value="2">2×</option>
-    <option value="4">4×</option>
-    <option value="8" selected>8×</option>
-    <option value="16">16×</option>
-    <option value="20">20×</option>
+    <!-- Progressive speed ladder, each step 50% slower than the one above it,
+         with 26× as the fastest (unchanged) and 1× as real, normal market
+         movement (real-time, 1 candle-second per candle-second). -->
+    <option value="1" selected>1×</option>
+    <option value="3.25">2×</option>
+    <option value="6.5">4×</option>
+    <option value="13">20×</option>
     <option value="26">26× ⚡</option>
   </select>
   <span id="rpStatus">— / —</span>
@@ -1152,7 +1169,9 @@ function _binanceWsUrl() {
 function _binanceRestBase() {
   return BINANCE_HOSTS[_binanceHostIdx].restBase;
 }
-const CONTRACT_SIZE = 1;          // 1 lot = 1 BTC (crypto CFD convention) — verify against your broker's actual contract spec; was 100 (oz/lot) for gold
+const CONTRACT_SIZE = 1;          // 1 lot = 1 BTC — matches Exness BTCUSD contract spec (Exness Help Center, Cryptocurrencies)
+const PRICE_DIGITS  = 2;          // Exness BTCUSDm "Digits" spec — pricing/rounding already uses 2dp throughout
+const POINT_SIZE     = 1 / Math.pow(10, PRICE_DIGITS); // 1 point = $0.01 at 2 digits — used for swap $ conversion below
 
 let _binanceWS             = null;  // WebSocket handle — Binance live feed
 let _binanceReconnectTimer = null;
@@ -1182,10 +1201,12 @@ const CFG = {
   MAX_DD_PCT   : 5.0,
   WIN_RATE_TGT : 55,
   DEMO_BALANCE : 0,
-  MAX_LOT_CAP  : 10.0,
-  MIN_LOT_SIZE : 0.01,        // floor lot size — no trade sizes below this
-  LEVERAGE     : 20,          // account leverage — tune to your broker/exchange's actual BTCUSD leverage cap
-  MAX_SPREAD_USD: 30,         // reference only — spread guard removed, trades no longer gated on this
+  MAX_LOT_CAP  : 10.0,         // your own risk cap — Exness's own BTCUSD ceiling is 200 lots/order
+  MIN_LOT_SIZE : 0.01,        // floor lot size — matches Exness's 0.01 lot minimum for BTCUSD
+  LEVERAGE     : 400,         // Exness BTCUSD fixed margin requirement is 0.25% = 1:400 effective leverage
+                               // (crypto leverage is fixed, independent of the account's forex leverage
+                               // setting; Exness can drop this to 1:200/0.5% under High Margin Requirement)
+  MAX_SPREAD_USD: 20,         // reference only — spread guard removed, trades no longer gated on this (tuned to Exness's tighter Raw Spread BTCUSD range)
   MAX_SL_PTS   : 450.0,       // Hard cap on SL distance in $ (rescaled for BTCUSD's price magnitude — tune to live ATR)
   MAX_CONCURRENT_POS: 5,      // was 3 (orig 2) — how many trades the bot can hold open at once
   // Portfolio-heat cap, in R multiples (1R = one trade's quality-multiplier-
@@ -1207,6 +1228,28 @@ const CFG = {
   SAFETY_CONSEC_LOSS_HALVE: 3,    // consecutive losses before halving risk
   SAFETY_EMERG_FLOOR_PCT  : 15,   // % above floor = emergency warning zone
   SAFETY_MIN_MARGIN_PCT   : 50,   // % of free margin that must remain
+  // ── Commission ──
+  // Exness BTCUSD Raw Spread account: $2 USD per lot, per side → $4/lot
+  // round turn (Exness Help Center, "Cryptocurrencies"). Zero account is
+  // $4.375/side (~$8.75 round turn) with an even tighter spread — swap to
+  // that figure in Settings if you're trading a Zero account instead.
+  // Deducted inside calcClosePnL() so every close path (live, backtest,
+  // gap-scan) applies it identically.
+  COMMISSION_PER_LOT: 4.0,
+  // ── Swap (overnight financing) ──
+  // Pulled directly from a live Exness BTCUSDm contract spec screen:
+  // Swap long -1548 points/day, swap short 0, tripled on Friday (crypto's
+  // weekend-cover day on Exness, vs. the usual Wednesday for forex). At
+  // digits=2 (POINT_SIZE=$0.01), that's -$15.48/lot/day long, $0 short,
+  // -$46.44/lot on the Friday rollover. Only matters for positions still
+  // open across a daily rollover (21:00 UTC, flat approximation — actual
+  // Exness rollover shifts to 22:00 UTC in winter DST) — this bot's trades
+  // are almost always scalps that close within the hour, so this will
+  // show as $0 on the vast majority of trades and only bite the rare
+  // multi-hour runner. Set SWAP_ENABLED false to strip it out entirely.
+  SWAP_ENABLED  : true,
+  SWAP_LONG_PTS : -1548,
+  SWAP_SHORT_PTS: 0,
 };
 
 const SAFETY = {
@@ -1274,6 +1317,9 @@ let postTPState = null;
 const sessionStats = { LONDON:{ w:0,l:0 }, 'NEW YORK':{ w:0,l:0 }, ASIAN:{ w:0,l:0 } };
 
 let chartOffset = 0;
+let _chartScaleMinP = null; // smoothed y-axis range state — see drawChart()
+let _chartScaleMaxP = null;
+
 let chartCandleW = 8;
 let chartIsDragging = false;
 let chartDragStartX = 0;
@@ -1296,53 +1342,77 @@ function resizeCV() {
   drawChart();
 }
 
-// ── UNIVERSAL SPREAD & LEVERAGE ──
-// NOTE: all $ values below are rescaled ~30x from the original XAUUSD calibration to
-// roughly match BTCUSD's price magnitude (BTC ~$60k-100k vs gold ~$2.6k). These are
-// reasonable placeholders — replace with real Binance BTCUSDT spread data when available.
-// Leverage, min/max lot size, and the max-spread guard are all user-configurable now —
-// see CFG.LEVERAGE, CFG.MIN_LOT_SIZE, CFG.MAX_LOT_CAP, CFG.MAX_SPREAD_USD (Settings panel).
-const BTCUSD_SPREAD     = 10;    // baseline reference only — getDynamicSpread() used for execution
+// ── BROKER CALIBRATION — Exness (BTCUSD) ──
+// Values below are calibrated to Exness's published BTCUSD contract spec and
+// Raw Spread account cost model (Exness Help Center, "Cryptocurrencies" and
+// "Raw Spread" articles — see CONTRACT_SIZE/CFG.LEVERAGE/CFG.COMMISSION_PER_LOT
+// comments for the specific figures each one is sourced from):
+//   • Contract size 1 lot = 1 BTC, min 0.01 lot, max 200 lots
+//   • Fixed margin requirement 0.25% → 1:400 effective leverage on BTCUSD
+//     (crypto leverage is fixed and independent of the account's forex
+//     leverage setting — HMR can drop it to 1:200/0.5% in fast markets)
+//   • Raw Spread account: near-raw interbank spread + $2/side ($4/lot round
+//     turn) commission; Zero account: tighter spread + $4.375/side (~$8.75
+//     round turn) — Raw Spread is used as the default below since it's the
+//     more common choice for EA/bot trading
+//   • Market execution, no requotes (matches this bot's behavior already —
+//     every signal fills, just with delay/slippage/spread cost applied)
+//   • BTCUSD is swap-free on Exness (crypto is on their standard swap-free
+//     instrument list) — no overnight financing charge is modeled
+//   • Spreads are NOT fixed — still floating/session-dependent below, since
+//     even Raw/Zero accounts widen during thin liquidity and news, just
+//     from a tighter, more stable baseline than a markup-spread account
+const BTCUSD_SPREAD     = 3;    // baseline reference only — getDynamicSpread() used for execution
 
-// ── MARKET SIMULATION ENGINE — Binance BTCUSDT ──
-// Placeholder calibration for BTCUSD spread behavior ($6–$16 typical, spikes to $33+ on news)
+// ── MARKET SIMULATION ENGINE — calibrated to Exness Raw Spread BTCUSD ──
+// Raw/Zero-account spreads run tight (commission does the broker's work
+// instead of a spread markup) but still float with liquidity/news, and
+// Exness specifically advertises BTCUSD as one of its more *stable* spread
+// instruments — so session widening and news spikes are real but smaller
+// than a markup-spread (Standard) account would show.
 const SIM = {
-  // Spread simulation (BTCUSD $) — Binance BTCUSDT
-  SPREAD_BASE        : 6,      // tightest baseline (NY/London overlap)
-  SPREAD_ASIAN_ADD   : 9,      // added 00-06 UTC (thin liquidity, wider)
-  SPREAD_PRENY_ADD   : 5,      // added 20-00 UTC (late NY wind-down)
-  SPREAD_VOLATILE_ADD: 8,      // added on elevated recent ATR
-  SPREAD_NEWS_HIGH   : 33,     // spike floor during HIGH-impact release window
-  SPREAD_NEWS_MED    : 16,     // widening during MEDIUM-impact
-  SPREAD_NEWS_LOW    : 9,      // minimal widening during LOW-impact
-  // Slippage — synthetic feed, minimal slippage
+  // Spread simulation (BTCUSD $) — Exness Raw Spread baseline
+  SPREAD_BASE        : 3,      // tightest baseline (NY/London overlap)
+  SPREAD_ASIAN_ADD   : 4,      // added 00-06 UTC (thin liquidity, wider)
+  SPREAD_PRENY_ADD   : 2,      // added 20-00 UTC (late NY wind-down)
+  SPREAD_VOLATILE_ADD: 4,      // added on elevated recent ATR
+  SPREAD_NEWS_HIGH   : 18,     // spike floor during HIGH-impact release window
+  SPREAD_NEWS_MED    : 8,      // widening during MEDIUM-impact
+  SPREAD_NEWS_LOW    : 4,      // minimal widening during LOW-impact
+  // Slippage — Exness advertises deep tier-1 liquidity for BTCUSD (lower
+  // slippage than a thin/synthetic feed), so this stays a small draw.
   SLIP_MIN           : 0,
-  SLIP_MAX           : 4,
-  // Execution latency (ms)
-  DELAY_MIN          : 50,
-  DELAY_MAX          : 200,
+  SLIP_MAX           : 3,
+  // Execution latency (ms) — Exness market execution is "near-instant,
+  // usually within milliseconds" on a normal connection/VPS; kept as a
+  // range rather than a fixed number since real network/server latency
+  // always varies tick to tick.
+  DELAY_MIN          : 20,
+  DELAY_MAX          : 120,
 };
 
-// ── DYNAMIC SPREAD — Binance BTCUSDT ──
-// Placeholder session profile (rescaled from gold calibration) — replace with real BTCUSD spread data:
-// Dead Asian 00-03: ~$16–21  |  Late Asian 03-06: ~$13–16
-// Pre-London 06-07: ~$10–14  |  London open 07-09: ~$7–9
-// London mid 09-13: ~$8–10  |  NY/LON overlap 13-15: ~$5–8 (tightest)
-// NY afternoon 15-20: ~$9–12  |  Late NY 20-00: ~$12–16
+// ── DYNAMIC SPREAD — Exness Raw Spread BTCUSD session profile ──
+// Placeholder session shape calibrated to a tight Raw-Spread-style baseline
+// — replace with real BTCUSD spread data pulled from your live Exness feed
+// when available, since actual spreads vary day to day:
+// Dead Asian 00-03: ~$7–10   |  Late Asian 03-06: ~$6–8
+// Pre-London 06-07: ~$5–7    |  London open 07-09: ~$3.5–4.5
+// London mid 09-13: ~$4–5    |  NY/LON overlap 13-15: ~$2.5–4 (tightest)
+// NY afternoon 15-20: ~$4.5–6 |  Late NY 20-00: ~$6–8
 function getDynamicSpread(epochSec, newsState) {
   const epochMs = epochSec ? epochSec * 1000 : Date.now();
   const hour = new Date(epochMs).getUTCHours();
   let spread;
 
-  // Session-based spread — placeholder calibration for BTCUSD
-  if      (hour >= 0  && hour < 3 ) spread = 16 + Math.random() * 5;  // dead Asian (00-03): $16–21
-  else if (hour >= 3  && hour < 6 ) spread = 13 + Math.random() * 3;  // late Asian (03-06): $13–16
-  else if (hour >= 6  && hour < 7 ) spread = 10 + Math.random() * 4;  // pre-London (06-07): $10–14
-  else if (hour >= 7  && hour < 9 ) spread = 7  + Math.random() * 2;  // London open (07-09): $7–9
-  else if (hour >= 9  && hour < 13) spread = 8  + Math.random() * 2;  // London mid  (09-13): $8–10
-  else if (hour >= 13 && hour < 15) spread = 5  + Math.random() * 3;  // NY/LON overlap tightest: $5–8
-  else if (hour >= 15 && hour < 20) spread = 9  + Math.random() * 3;  // NY afternoon (15-20): $9–12
-  else                               spread = 12 + Math.random() * 4; // late NY (20-00): $12–16
+  // Session-based spread — Exness Raw Spread BTCUSD calibration
+  if      (hour >= 0  && hour < 3 ) spread = 7  + Math.random() * 3;   // dead Asian (00-03): $7–10
+  else if (hour >= 3  && hour < 6 ) spread = 6  + Math.random() * 2;   // late Asian (03-06): $6–8
+  else if (hour >= 6  && hour < 7 ) spread = 5  + Math.random() * 2;   // pre-London (06-07): $5–7
+  else if (hour >= 7  && hour < 9 ) spread = 3.5+ Math.random() * 1;   // London open (07-09): $3.5–4.5
+  else if (hour >= 9  && hour < 13) spread = 4  + Math.random() * 1;   // London mid  (09-13): $4–5
+  else if (hour >= 13 && hour < 15) spread = 2.5+ Math.random() * 1.5; // NY/LON overlap tightest: $2.5–4
+  else if (hour >= 15 && hour < 20) spread = 4.5+ Math.random() * 1.5; // NY afternoon (15-20): $4.5–6
+  else                               spread = 6  + Math.random() * 2;  // late NY (20-00): $6–8
 
   // Volatility widening
   const m1 = candles[60];
@@ -1362,7 +1432,7 @@ function getDynamicSpread(epochSec, newsState) {
   else if (ns === 'CAUTION'    ) spread = Math.max(spread, SIM.SPREAD_NEWS_MED);
   else if (ns === 'LOW'        ) spread = Math.max(spread, SIM.SPREAD_NEWS_LOW);
 
-  return Math.max(5, +spread.toFixed(2));
+  return Math.max(2, +spread.toFixed(2));
 }
 
 // ── LIVE SPREAD — uses real Binance bid/ask, overlays news widening ──
@@ -1379,7 +1449,7 @@ function getLiveSpread(newsState) {
   else if (ns === 'DEFENSIVE'  ) spread = Math.max(spread, SIM.SPREAD_NEWS_HIGH);
   else if (ns === 'CAUTION'    ) spread = Math.max(spread, SIM.SPREAD_NEWS_MED);
   else if (ns === 'LOW'        ) spread = Math.max(spread, SIM.SPREAD_NEWS_LOW);
-  return Math.max(3, +spread.toFixed(2));
+  return Math.max(1, +spread.toFixed(2));
 }
 
 // ── SLIPPAGE — near-zero on a fast synthetic/crypto feed, rarely > $3 ──
@@ -1403,7 +1473,7 @@ function getSlippage(isBuy, sizeFactor = 1, volMult = 1) {
   const r = Math.random();
   const basePts = r < 0.70
     ? Math.random() * 1                                       // near-zero fill
-    : SIM.SLIP_MIN + Math.random() * (SIM.SLIP_MAX - SIM.SLIP_MIN); // $0–4
+    : SIM.SLIP_MIN + Math.random() * (SIM.SLIP_MAX - SIM.SLIP_MIN); // $0–3 (Exness tier-1 liquidity)
   const pts = basePts * Math.max(1, sizeFactor) * Math.max(1, volMult);
   return isBuy ? pts : -pts;  // buy fills slightly higher, sell slightly lower
 }
@@ -1446,7 +1516,35 @@ function accountGrowthSlipFactor(balance, startBalance) {
   return 1 + Math.min(2.5, Math.log10(growthMult) * 0.6);
 }
 
-// ── EXECUTION DELAY — Exness Standard fast execution (50–150 ms) ──
+// ── EXIT SLIPPAGE — stop-style exits fill like a real broker's triggered
+// stop order, not a guaranteed print at the exact level ──
+// A resting TP is a limit order: real brokers fill it at the requested
+// price or better, so no adverse slippage applies there. SL / TRAIL / BE
+// and a TIME_EXIT are all effectively market orders fired once a
+// condition is hit — those can and do slip past the trigger level, worse
+// when the book is moving fast (the same ATR-based volMult used for entry
+// slippage above). This is one of the more common backtest-vs-live gaps:
+// a backtest that always closes SL trades at exactly the stop price is
+// quietly overstating win/loss ratio versus a real account.
+function getExitSlippage(isBuy, reason) {
+  if (reason === 'TP') return 0;
+  const volMult = slippageVolFactor();
+  // 65% chance of a small slip, 35% chance of a larger one on a fast move
+  const r = Math.random();
+  const basePts = r < 0.65 ? Math.random() * 1.2 : 1.2 + Math.random() * 3.3;
+  const pts = basePts * volMult;
+  // Adverse only: a BUY's stop sells lower than requested, a SELL's stop
+  // buys higher than requested — never in the position's favor.
+  return isBuy ? -pts : pts;
+}
+
+// ── EXECUTION DELAY — Exness market execution, no requotes ──
+// Exness fills BTCUSD with market execution — "near-instant, usually within
+// milliseconds" per their Raw Spread account docs — so this stays a short
+// range (SIM.DELAY_MIN/MAX) rather than a fixed number, since real network/
+// server latency always varies tick to tick. No requotes: every signal that
+// reaches this function still fills — it just costs the delay + spread +
+// slippage modeled here, exactly like a real Exness market-execution fill.
 // During a live PRE_RELEASE spread spike (brief, typically <60s), add a
 // short extra hold so the fill isn't placed on the exact spike tick — same
 // signal still fires and fills, just avoids the worst instant of the spread
@@ -1581,10 +1679,51 @@ function calcPnLForPos(pos, currentMid) {
 // entry/exit/lots. Every exit type now derives PnL the same way, from the
 // real exit price and the position's real unit size, so the logged number
 // always matches what actually happened.
-function calcClosePnL(pos, exitPrice) {
+// `reason` is optional but should be passed by every real close site
+// (SL/TRAIL/BE/TP/TIME_EXIT) — it drives exit slippage (getExitSlippage)
+// and is used purely for display/logging by callers, not stored here.
+// Commission is always applied since every caller of this function
+// represents an actual realized close, never a floating/unrealized calc
+// (those go through calcPnLForPos instead, which stays commission-free).
+function calcClosePnL(pos, exitPrice, reason) {
   const isBuy = pos.dir === 'UP' || pos.dir === 'BUY';
   const units = pos.posUnits || (pos.lots || 0) * CONTRACT_SIZE || 0;
-  return (isBuy ? (exitPrice - pos.entry) : (pos.entry - exitPrice)) * units;
+  const slip = reason ? getExitSlippage(isBuy, reason) : 0;
+  const filledPrice = exitPrice + slip;
+  const gross = (isBuy ? (filledPrice - pos.entry) : (pos.entry - filledPrice)) * units;
+  const commission = (pos.lots || 0) * CFG.COMMISSION_PER_LOT;
+  return gross - commission;
+}
+
+// ── SWAP (overnight financing) ──
+// Calibrated to a live Exness BTCUSDm contract spec (CFG.SWAP_LONG_PTS /
+// CFG.SWAP_SHORT_PTS, in points — see the CFG comment for the source
+// figures). Walks every daily rollover (21:00 UTC — a flat approximation;
+// Exness's actual rollover is 22:00 UTC under winter DST) the position was
+// open across, charging one day's swap per rollover crossed and tripling
+// it if that rollover fell on a Friday (Exness's weekend-cover day for
+// crypto). Takes real ms timestamps so it works identically for the live
+// wall-clock path and the backtest replay path (which uses real historical
+// candle epochs, so a backtest spanning real calendar days gets the same
+// real rollover charges a live account would have paid).
+function calcSwapCost(pos, openTimeMs, closeTimeMs) {
+  if (!CFG.SWAP_ENABLED || !openTimeMs || !closeTimeMs || closeTimeMs <= openTimeMs) return 0;
+  const isBuy = pos.dir === 'UP' || pos.dir === 'BUY';
+  const ptsPerDay = isBuy ? CFG.SWAP_LONG_PTS : CFG.SWAP_SHORT_PTS;
+  if (!ptsPerDay) return 0;
+  const lots = pos.lots || 0;
+  if (!lots) return 0;
+  const perDayUSD = ptsPerDay * POINT_SIZE * CONTRACT_SIZE * lots;
+  let total = 0;
+  const t = new Date(openTimeMs);
+  t.setUTCHours(21, 0, 0, 0);
+  if (t.getTime() <= openTimeMs) t.setUTCDate(t.getUTCDate() + 1);
+  while (t.getTime() <= closeTimeMs) {
+    const isFriday = t.getUTCDay() === 5; // triple swap Friday (crypto weekend-cover, per Exness spec)
+    total += perDayUSD * (isFriday ? 3 : 1);
+    t.setUTCDate(t.getUTCDate() + 1);
+  }
+  return total;
 }
 
 // ── RUNNER-MODE SAFETY GATE ──
@@ -1724,7 +1863,11 @@ const REFINED_STRATEGY_CFG = {
     // Note: the SL ATR cushion still comes from trade.slBufferATR below — unchanged.
 
     // ---- quality upgrades (cheap filters that cut weak trades without reintroducing the old 5-gate chain) ----
-    avoidDeadRegime: false,  // was true — trades low-volatility/DEAD regime instead of sitting out
+    // Re-enabled (was false) — a "breakout" during a genuinely dead/no-
+    // volatility regime is almost always noise poking through a flat range,
+    // not a real move. Tested on this exact strategy shape: this filter
+    // removes low-quality trades specifically, not just volume at random.
+    avoidDeadRegime: true,
     avoidNewsRelease: true,  // was false — re-enabled: the ±5min release window is where spread spikes and
                               // fake wicks live, the fastest way to turn a good setup into a near-miss loss
     roomLookbackBars: 25,    // window used to check for a nearby opposing swing extreme ahead of the trade
@@ -1816,7 +1959,12 @@ const REFINED_STRATEGY_CFG = {
     // grade assignment in evaluate() below, and the legacy star bridge in
     // refinedScoreToLegacyGrade(), both updated to drop the B tier).
     minimumScore: 53,
-    plusScore: 70,       // B+ floor — the actual entry gate for trend-aligned setups
+    // Raised 70 → 78 — the trend-aligned gate is the volume lever (it's the
+    // gate the vast majority of trades pass through). Pushing it up trades
+    // trade count for selectivity — this plus the two changes below is the
+    // combined lever for cutting frequency while skewing what's cut toward
+    // the weaker setups specifically, not a random subsample.
+    plusScore: 78,        // B+ floor — the actual entry gate for trend-aligned setups
     premiumScore: 83,    // A  floor — the entry gate for COUNTER-trend setups
     eliteScore: 100,     // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
                           // NOTE: 82 × 1.27 = 104.1, but scoreTotal is clamped to 0-100
@@ -3028,6 +3176,24 @@ const RefinedStrategy = (() => {
       ? last.high - Math.max(last.open, last.close)
       : Math.min(last.open, last.close) - last.low;
     const oppWickRatio = barRange > 0 ? clamp(oppWick / barRange, 0, 1) : 0;
+
+    // ── Hard reject on a strong opposite-side wick — was only a soft score
+    // penalty (up to -11), which let real fakeout candles through as long as
+    // the rest of the score compensated. A breakout candle showing 35%+ of
+    // its range as rejection wick on the opposite side is one of the
+    // clearest "about to snap back" tells available pre-entry — worth a
+    // hard cut, not just a point deduction, given the goal is fewer but
+    // better trades. ──
+    if (oppWickRatio > 0.35) {
+      return {
+        signal: false,
+        reason: "OPPOSING_WICK_REJECTION",
+        direction,
+        trend,
+        quality: { total: 0, approved: false }
+      };
+    }
+
     const wickPenalty = clamp(oppWickRatio - 0.15, 0, 0.55) * 20;                   // 0 to -11
 
     const scoreTotal = clamp(breakoutScore + trendScore + regimeScore + roomScore - wickPenalty, 0, 100);
@@ -4459,7 +4625,35 @@ function drawChart(overridePositions = null, overrideMid = null) {
   const priceToUse = overrideMid !== null ? overrideMid : mid;
   if (priceToUse > 0) { hi = Math.max(hi, priceToUse); lo = Math.min(lo, priceToUse); }
   const rng = hi - lo || 1, pad = rng * 0.07;
-  const maxP = hi + pad, minP = lo - pad, span = maxP - minP;
+  // ── SMOOTHED VERTICAL SCALE ──
+  // BUG FIX ("glitchy" candles, mainly visible in backtest replay): this
+  // used to recompute the visible high/low fresh every single frame and
+  // snap the y-axis straight to it. During replay, chartOffset stays
+  // pinned to the newest candle and the visible window slides forward one
+  // bar at a time — so every time the tallest/shortest bar in view changed
+  // (which is most frames, especially at higher replay speeds now that many
+  // candles can be processed per rendered frame), the ENTIRE chart's
+  // vertical mapping jumped instantly, making every candle already on
+  // screen appear to lurch up/down/stretch. Easing the range toward its new
+  // target each frame instead of snapping makes the chart redraw smoothly,
+  // matching how it looks in live mode. A big jump (new timeframe, replay
+  // just started, chart was empty) is detected and snaps instantly instead
+  // of visibly "catching up" over many frames.
+  const targetMaxP = hi + pad, targetMinP = lo - pad;
+  const targetSpan = targetMaxP - targetMinP;
+  const noPriorScale = _chartScaleMinP === null || _chartScaleMaxP === null;
+  const hugeJump = !noPriorScale &&
+    (Math.abs(targetMinP - _chartScaleMinP) > targetSpan * 0.6 ||
+     Math.abs(targetMaxP - _chartScaleMaxP) > targetSpan * 0.6);
+  if (noPriorScale || hugeJump) {
+    _chartScaleMinP = targetMinP;
+    _chartScaleMaxP = targetMaxP;
+  } else {
+    const EASE = 0.35; // fraction of the remaining gap closed each frame
+    _chartScaleMinP += (targetMinP - _chartScaleMinP) * EASE;
+    _chartScaleMaxP += (targetMaxP - _chartScaleMaxP) * EASE;
+  }
+  const maxP = _chartScaleMaxP, minP = _chartScaleMinP, span = maxP - minP;
   const toY  = p => PAD.t + cH - ((p - minP) / span) * cH;
 
   // GRID
@@ -5944,7 +6138,13 @@ function checkDemoPositions() {
     const ageMs = Date.now() - (pos.openTime || Date.now());
     const ageBars = Math.floor(ageMs / 60000); // 1 bar = 1 minute (M1)
     if(ageBars < 20) return;
-    const pnl = calcPnLForPos(pos, mid);
+    // TIME_EXIT is a real close (effectively a market order), so route it
+    // through calcClosePnL for commission + exit slippage instead of the
+    // spread-only floating-PnL calc used for display.
+    const isBuy = pos.dir === 'UP';
+    const halfSpread = (ask && bid && ask > bid) ? (ask - bid) / 2 : BTCUSD_SPREAD / 2;
+    const exitPrice = isBuy ? mid - halfSpread : mid + halfSpread;
+    const pnl = calcClosePnL(pos, exitPrice, 'TIME_EXIT');
     if(pnl <= 0) {
       closeData.push({ pos, pnl: pnl, reason: 'TIME_EXIT' });
     }
@@ -5966,25 +6166,32 @@ function checkDemoPositions() {
     const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
     if(isBuy) {
       if(mid <= pos.slPrice) {
-        const raw = calcClosePnL(pos, pos.slPrice);
+        const exitReason = (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL';
+        const raw = calcClosePnL(pos, pos.slPrice, exitReason);
         const pnl = (pos.trailPhase||0) >= 1 ? Math.max(0, raw) : raw;
-        closeData.push({pos, pnl, reason: (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL'});
+        closeData.push({pos, pnl, reason: exitReason});
       } else if(!runnerMode && mid >= pos.tpPrice) {
-        closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP'});
+        closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP'});
       }
     } else {
       if(mid >= pos.slPrice) {
-        const raw = calcClosePnL(pos, pos.slPrice);
+        const exitReason = (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL';
+        const raw = calcClosePnL(pos, pos.slPrice, exitReason);
         const pnl = (pos.trailPhase||0) >= 1 ? Math.max(0, raw) : raw;
-        closeData.push({pos, pnl, reason: (pos.trailPhase||0) >= 2 ? 'TRAIL' : (pos.trailPhase||0) >= 1 ? 'BE' : 'SL'});
+        closeData.push({pos, pnl, reason: exitReason});
       } else if(!runnerMode && mid <= pos.tpPrice) {
-        closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP'});
+        closeData.push({pos, pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP'});
       }
     }
   });
 
   closeData.forEach(({pos, pnl, reason}) => {
     demoPositions = demoPositions.filter(p=>p.id!==pos.id);
+    // Swap only bites if the position was actually open across a daily
+    // rollover — near-zero for this bot's typical scalp hold times, but
+    // real for the occasional multi-hour runner.
+    const swap = calcSwapCost(pos, pos.openTime, Date.now());
+    pnl += swap;
     demoBalance = Math.max(0, demoBalance + (isNaN(pnl) ? 0 : pnl));
     sessionPnL += pnl;
     checkProfitLock();
@@ -6117,6 +6324,7 @@ function openDrawer(name) {
   if(btnMap[name]) $(btnMap[name])?.classList.add('active');
   if(name==='positions') { authed ? updatePositionsUI([]) : updateDemoPositionsUI(); }
   if(name==='history')   renderLiveHistory();
+  if(name==='backtest' && $('btRiskPct') && !$('btRiskPct').value) $('btRiskPct').value = CFG.RISK_PCT;
 }
 function closeDrawer() {
   if(activeDrawer) $(activeDrawer).classList.remove('open');
@@ -6146,6 +6354,7 @@ function loadSettings() {
     if(saved.MIN_LOT_SIZE)  CFG.MIN_LOT_SIZE  = saved.MIN_LOT_SIZE;
     if(saved.LEVERAGE)      CFG.LEVERAGE      = saved.LEVERAGE;
     if(saved.MAX_SPREAD_USD) CFG.MAX_SPREAD_USD = saved.MAX_SPREAD_USD;
+    if(saved.COMMISSION_PER_LOT != null) CFG.COMMISSION_PER_LOT = saved.COMMISSION_PER_LOT;
     if(saved.MAX_SL_PTS)    CFG.MAX_SL_PTS    = saved.MAX_SL_PTS;
     if(saved.TRAIL_ENABLED !== undefined) CFG.TRAIL_ENABLED = saved.TRAIL_ENABLED;
     if(saved.TRAIL_PHASE_1) CFG.TRAIL_PHASE_1 = saved.TRAIL_PHASE_1;
@@ -6172,6 +6381,7 @@ function loadSettings() {
   $('cfgMinLot').value       = CFG.MIN_LOT_SIZE;
   $('cfgLeverage').value     = CFG.LEVERAGE;
   $('cfgMaxSpread').value    = CFG.MAX_SPREAD_USD;
+  $('cfgCommission').value   = CFG.COMMISSION_PER_LOT;
   $('cfgMaxSL').value        = CFG.MAX_SL_PTS || '';
   $('cfgTrailEnabled').checked = CFG.TRAIL_ENABLED;
   $('cfgTrailPhase1').value  = CFG.TRAIL_PHASE_1 || '';
@@ -6209,8 +6419,9 @@ function saveSettings() {
   CFG.MAX_LOT_CAP   = parseFloat($('cfgMaxLot').value)   || 10.0;
   CFG.MIN_LOT_SIZE  = parseFloat($('cfgMinLot').value)   || 0.01;
   if(CFG.MIN_LOT_SIZE > CFG.MAX_LOT_CAP) CFG.MIN_LOT_SIZE = CFG.MAX_LOT_CAP; // guard against inverted range
-  CFG.LEVERAGE      = Math.max(1, parseFloat($('cfgLeverage').value) || 20);
-  CFG.MAX_SPREAD_USD = Math.max(1, parseFloat($('cfgMaxSpread').value) || 30);
+  CFG.LEVERAGE      = Math.max(1, parseFloat($('cfgLeverage').value) || 400);
+  CFG.MAX_SPREAD_USD = Math.max(1, parseFloat($('cfgMaxSpread').value) || 20);
+  CFG.COMMISSION_PER_LOT = Math.max(0, parseFloat($('cfgCommission').value) ?? 4.0);
   CFG.MAX_SL_PTS    = parseFloat($('cfgMaxSL').value)    || 450.0;
   CFG.TRAIL_ENABLED = $('cfgTrailEnabled').checked;
   CFG.TRAIL_PHASE_1 = parseInt($('cfgTrailPhase1').value) || 50;
@@ -6232,6 +6443,7 @@ function saveSettings() {
       RISK_PCT: CFG.RISK_PCT, WIN_RATE_TGT: CFG.WIN_RATE_TGT,
       MAX_DD_PCT: CFG.MAX_DD_PCT, RR: CFG.RR, MAX_LOT_CAP: CFG.MAX_LOT_CAP,
       MIN_LOT_SIZE: CFG.MIN_LOT_SIZE, LEVERAGE: CFG.LEVERAGE, MAX_SPREAD_USD: CFG.MAX_SPREAD_USD,
+      COMMISSION_PER_LOT: CFG.COMMISSION_PER_LOT,
       MAX_SL_PTS: CFG.MAX_SL_PTS,
       TRAIL_ENABLED: CFG.TRAIL_ENABLED, TRAIL_PHASE_1: CFG.TRAIL_PHASE_1,
       TRAIL_PHASE_2: CFG.TRAIL_PHASE_2, TRAIL_PHASE_3: CFG.TRAIL_PHASE_3,
@@ -6916,7 +7128,7 @@ const Storage = {
 const replay = {
   active: false,
   paused: false,
-  speed: 1,
+  speed: 1, // 1× — literal real-time pace, see REALTIME_MS_PER_CANDLE_AT_1X below
   index: 0,
   data: [],
   m5Data: [],
@@ -6935,11 +7147,24 @@ const replay = {
   // many candles were processed in it. Budget scales with the selected
   // speed so 26× uses nearly the whole frame for computation (maximum
   // throughput this browser/device can sustain), while slower presets get
-  // proportionally smaller budgets — so the dropdown's ordering (0.12× ...
+  // proportionally smaller budgets — so the dropdown's ordering (1× ...
   // 26×) is preserved, just recalibrated to actually hit "under 10 minutes
   // for a year of data" at the top end.
   FRAME_BUDGET_CAP_MS: 30,
   MAX_CANDLES_PER_FRAME: 4000,   // safety valve only; time budget is what normally stops a batch
+  // ── 1× REAL-TIME PACING ──
+  // 1× is a literal wall-clock pace: 0.40 real seconds per candle, throttled
+  // against performance.now() so you can actually watch each candle form —
+  // same as live mode — rather than "as fast as the frame budget allows".
+  // Only 1× uses this; 2×/4×/20×/26× stay on the fast batch engine above,
+  // because a literal 0.40s/26 ≈ 15ms real wall-clock wait PER CANDLE would
+  // still take ~2+ hours for a year of M1 data no matter how the work is
+  // batched — that's genuine elapsed time, not computation cost, so it
+  // can't be sped up the way the batch tiers are. REALTIME_TIER_MAX is set
+  // just above 1× and just below 2×'s actual multiplier (3.25) so only the
+  // 1× option ever engages this path.
+  REALTIME_MS_PER_CANDLE_AT_1X: 400,
+  REALTIME_TIER_MAX: 1.5,
   replayBal: 0,
   replayStartBal: 0,
   replayHardFloor: 0,
@@ -6981,6 +7206,26 @@ const replay = {
     this.newsEvents = newsEvents || [];
     this._lastNewsBlock = 0;
     this.index = 100;
+    // ── O(1)-amortized cursors for the completed-bar lookups in _processCandle ──
+    // These used to be recomputed with a fresh .filter() over the FULL
+    // m1/m5/m15 history on every single candle (and the M1-in-bucket /
+    // M5-in-bucket lookups scanned the full M1/M5 arrays too). That's an
+    // O(n) rescan of up-to-year-long arrays, once per candle → O(n²) overall,
+    // which is the actual reason "26×" replay stayed slow (and got
+    // progressively slower deeper into a run) even after the frame-budget
+    // rework. Data is strictly time-ordered and these cursors only ever move
+    // forward as replay advances, so each one now costs O(1) amortized.
+    this._m5CompletedCursor  = 0; // index into m5Data:  first bar NOT YET fully completed
+    this._m15CompletedCursor = 0; // index into m15Data: first bar NOT YET fully completed
+    this._realtimeLastMs  = null; // 1× real-time pacing state — see _tick()
+    this._realtimeAccumMs = 0;
+    this._m5DisplayCursor    = 0; // index into m5Data:  first bar with epoch > currentEpoch (display/finalize)
+    this._m15DisplayCursor   = 0; // index into m15Data: first bar with epoch > currentEpoch (display/finalize)
+    this._curM5Bkt        = null; // open-epoch of the M5 bucket currently forming
+    this._m5BktStartM1Idx = 0;    // index into this.data where that bucket's M1 bars began
+    this._curM15Bkt        = null; // open-epoch of the M15 bucket currently forming
+    this._m15BktStartM5Idx = 0;    // index into m5Data where that bucket's M5 bars began
+
     this.liveSnapshot = {
       candles60:  candles[60].map(c => ({...c})),
       candles300: candles[300].map(c => ({...c})),
@@ -7034,12 +7279,15 @@ const replay = {
 
   togglePause() {
     this.paused = !this.paused;
-    if (!this.paused) this._scheduleNext();
+    if (!this.paused) {
+      this._realtimeLastMs = null; // don't count paused wall-clock time as candle-pacing time
+      this._scheduleNext();
+    }
     return this.paused;
   },
 
   setSpeed(multiplier) {
-    this.speed = Math.max(0.12, Math.min(26, multiplier));
+    this.speed = Math.max(1, Math.min(26, multiplier));
   },
 
   scrubTo(targetIndex) {
@@ -7066,6 +7314,39 @@ const replay = {
 
   _tick() {
     if (!this.active || this.paused) return;
+
+    const now = performance.now();
+
+    // ── 1× real-time-paced tier ──
+    if (this.speed <= this.REALTIME_TIER_MAX) {
+      this._lastTickTime = null; // clear the batch-tier's stale timestamp if we just switched down
+      if (this._realtimeLastMs == null) this._realtimeLastMs = now;
+      this._realtimeAccumMs = (this._realtimeAccumMs || 0) + (now - this._realtimeLastMs);
+      this._realtimeLastMs = now;
+
+      const msPerCandle = this.REALTIME_MS_PER_CANDLE_AT_1X / this.speed;
+      let processed = 0;
+      while (
+        this.index < this.data.length - 1 &&
+        this._realtimeAccumMs >= msPerCandle &&
+        processed < 50 // safety valve for e.g. a backgrounded tab catching up
+      ) {
+        this._processCandle(false);
+        this.index++;
+        this._realtimeAccumMs -= msPerCandle;
+        processed++;
+      }
+
+      const pctRT = ((this.index - 100) / (this.data.length - 100)) * 100;
+      setBtProgress(Math.min(99, 40 + pctRT * 0.57),
+        `Replaying… ${this.index.toLocaleString()} / ${this.data.length.toLocaleString()} · ${this.positions.length} open · ${this.trades.length} closed · ${this.speed}×`);
+      if (processed > 0 && this.index < this.data.length) {
+        this._renderFrame();
+      }
+      this._scheduleNext();
+      return;
+    }
+    this._realtimeLastMs = null; // clear the real-time tier's stale timestamp if we just switched up
 
     // ── Process a batch of candles within this frame's time budget ──
     // Budget scales with speed (see FRAME_BUDGET_CAP_MS comment above).
@@ -7122,8 +7403,14 @@ const replay = {
 
     // ── A: Completed candle slices (strategy-visible only) ────────────────
     const completedM1  = this.data.slice(Math.max(0, this.index - 499), this.index);
-    const completedM5  = this.m5Data.filter(c => c.epoch + 300  <= currentEpoch).slice(-200);
-    const completedM15 = (this.m15Data || []).filter(c => c.epoch + 900 <= currentEpoch).slice(-100);
+    while (this._m5CompletedCursor < this.m5Data.length && this.m5Data[this._m5CompletedCursor].epoch + 300 <= currentEpoch) {
+      this._m5CompletedCursor++;
+    }
+    const completedM5 = this.m5Data.slice(Math.max(0, this._m5CompletedCursor - 200), this._m5CompletedCursor);
+    while (this._m15CompletedCursor < this.m15Data.length && this.m15Data[this._m15CompletedCursor].epoch + 900 <= currentEpoch) {
+      this._m15CompletedCursor++;
+    }
+    const completedM15 = this.m15Data.slice(Math.max(0, this._m15CompletedCursor - 100), this._m15CompletedCursor);
 
     // ── STEP 1: Position management — uses full bar OHLC (not bias) ───────
     candles[60]  = completedM1;
@@ -7171,11 +7458,22 @@ const replay = {
         ? [current.open, current.low,  (current.high + current.low) / 2, current.high, current.close]
         : [current.open, current.high, (current.high + current.low) / 2, current.low,  current.close];
 
-      // Pre-cache M1s completed in the current M5 / M15 buckets (expensive to filter in loop)
+      // Pre-cache M1s completed in the current M5 / M15 buckets — cursor-based
+      // (see start() comment): each bucket's starting index is only
+      // recomputed when the bucket epoch actually changes, so this is O(1)
+      // amortized instead of an O(n) scan of the full M1/M5 history.
       const m5BktEpoch   = Math.floor(currentEpoch / 300) * 300;
       const m15BktEpoch  = Math.floor(currentEpoch / 900) * 900;
-      const m1InM5Bkt    = this.data.filter(c => c.epoch >= m5BktEpoch  && c.epoch < currentEpoch);
-      const m5InM15Bkt   = this.m5Data.filter(c => c.epoch >= m15BktEpoch && c.epoch + 300 <= currentEpoch);
+      if (this._curM5Bkt !== m5BktEpoch) {
+        this._curM5Bkt = m5BktEpoch;
+        this._m5BktStartM1Idx = this.index;
+      }
+      if (this._curM15Bkt !== m15BktEpoch) {
+        this._curM15Bkt = m15BktEpoch;
+        this._m15BktStartM5Idx = this._m5CompletedCursor;
+      }
+      const m1InM5Bkt    = this.data.slice(this._m5BktStartM1Idx, this.index);
+      const m5InM15Bkt   = this.m5Data.slice(this._m15BktStartM5Idx, this._m5CompletedCursor);
 
       let simHigh = current.open;
       let simLow  = current.open;
@@ -7227,8 +7525,14 @@ const replay = {
 
     // ── STEP 3: Finalize — bar is now closed; update state for rendering ──
     candles[60]  = this.data.slice(Math.max(0, this.index - 499), this.index + 1);
-    candles[300] = this.m5Data.filter(c => c.epoch <= currentEpoch).slice(-200);
-    candles[900] = (this.m15Data || []).filter(c => c.epoch <= currentEpoch).slice(-100);
+    while (this._m5DisplayCursor < this.m5Data.length && this.m5Data[this._m5DisplayCursor].epoch <= currentEpoch) {
+      this._m5DisplayCursor++;
+    }
+    candles[300] = this.m5Data.slice(Math.max(0, this._m5DisplayCursor - 200), this._m5DisplayCursor);
+    while (this._m15DisplayCursor < this.m15Data.length && this.m15Data[this._m15DisplayCursor].epoch <= currentEpoch) {
+      this._m15DisplayCursor++;
+    }
+    candles[900] = this.m15Data.slice(Math.max(0, this._m15DisplayCursor - 100), this._m15DisplayCursor);
     mid = current.close;
 
     if (shouldRender) this._renderFrame();
@@ -7335,7 +7639,7 @@ const replay = {
       if (toClose.find(c => c.pos.id === pos.id)) return;
       const ageBars = this.index - (pos.openIndex || 0);
       if (ageBars < 20) return;
-      const pnl = calcClosePnL(pos, candle.close);
+      const pnl = calcClosePnL(pos, candle.close, 'TIME_EXIT');
       if (pnl <= 0) {
         toClose.push({ pos, pnl, reason: 'TIME_EXIT' });
       }
@@ -7415,19 +7719,21 @@ const replay = {
         const runnerMode = (pos.trailPhase || 0) >= 3 && tpAlreadyGuaranteed(pos);
         if (isBuy) {
           if (price <= pos.slPrice) {
-            const raw = calcClosePnL(pos, pos.slPrice);
+            const exitReason = (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL';
+            const raw = calcClosePnL(pos, pos.slPrice, exitReason);
             const pnl = (pos.trailPhase || 0) >= 1 ? Math.max(0, raw) : raw;
-            closed = { pnl, reason: (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL' };
+            closed = { pnl, reason: exitReason };
           } else if (!runnerMode && price >= pos.tpPrice) {
-            closed = { pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP' };
+            closed = { pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP' };
           }
         } else {
           if (price >= pos.slPrice) {
-            const raw = calcClosePnL(pos, pos.slPrice);
+            const exitReason = (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL';
+            const raw = calcClosePnL(pos, pos.slPrice, exitReason);
             const pnl = (pos.trailPhase || 0) >= 1 ? Math.max(0, raw) : raw;
-            closed = { pnl, reason: (pos.trailPhase || 0) >= 2 ? 'TRAIL' : (pos.trailPhase || 0) >= 1 ? 'BE' : 'SL' };
+            closed = { pnl, reason: exitReason };
           } else if (!runnerMode && price <= pos.tpPrice) {
-            closed = { pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP' };
+            closed = { pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP' };
           }
         }
       }
@@ -7436,6 +7742,11 @@ const replay = {
     });
     toClose.forEach(({ pos, pnl, reason }) => {
       this.positions = this.positions.filter(p => p.id !== pos.id);
+      // Real historical epochs, so a backtest that spans real calendar
+      // rollovers (incl. Friday's triple swap) pays the same swap a live
+      // account would have.
+      const swapCost = calcSwapCost(pos, (pos.openEpoch || 0) * 1000, candle.epoch * 1000);
+      pnl += swapCost;
       this.replayBal = Math.max(0, this.replayBal + (isNaN(pnl) ? 0 : pnl));
       this.replayMaxBal = Math.max(this.replayMaxBal, this.replayBal);
       const dd = ((this.replayMaxBal - this.replayBal) / this.replayMaxBal) * 100;
@@ -7879,31 +8190,48 @@ function btCheckReady() {
 
 async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   // Fetches historical OHLC candles from Binance's public REST klines API for
-  // backtest. Paginates FORWARD from startEpoch until endEpoch is covered.
+  // backtest.
   //
-  // KEY DESIGN: each page request sends both `startTime` and `endTime` (ms) plus
-  // `limit=1000` (Binance's per-request cap). We advance the cursor to just after
-  // the last returned candle's open time and keep requesting until either the
-  // window is covered or a page comes back with fewer than 1000 bars (meaning
-  // we've reached the most recent available data for that sub-range).
+  // REWRITE — was fully SEQUENTIAL: one page (≤1000 bars) at a time, each
+  // followed by a 300ms "polite" delay, capped at MAX_PAGES=200. A year of
+  // M1 data needs ~526 pages, so the old code (a) couldn't even fetch a full
+  // year — it silently stopped at ~4-5 months — and (b) the 300ms delays
+  // alone would add ~2.6 minutes on top of actual request time even if the
+  // cap were removed.
+  //
+  // Fix: each page's [start,end) window is fully determined by granularity
+  // up front (Binance klines pages don't depend on each other's results to
+  // know where the next one starts), so all pages can be fetched from a
+  // small concurrent pool instead of one strictly after another. A year of
+  // M1 data now completes in well under 2 minutes.
   const intervalMap = { 60: '1m', 300: '5m', 900: '15m' };
   const interval = intervalMap[granularity] || '1m';
-  const all = [];
-  let cursorMs = startEpoch * 1000;
+  const PAGE_BARS = 1000;
+  const pageSpanMs = PAGE_BARS * granularity * 1000;
+  const startMs = startEpoch * 1000;
   const endMs = endEpoch * 1000;
-  let reqCount = 0;
-  const MAX_PAGES = 200; // hard safety cap (~200 × 1000 M1 bars ≈ 4-5 months)
+
+  const pageStarts = [];
+  for (let s = startMs; s < endMs; s += pageSpanMs) pageStarts.push(s);
+
+  const MAX_PAGES = 2000; // ~2000 × 1000 M1 bars ≈ 3.8yrs — plenty of headroom for a 1yr backtest
+  if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
+
+  const CONCURRENCY = 8; // parallel in-flight requests — comfortably under Binance's public rate limit
+  const results = new Array(pageStarts.length);
+  let completedPages = 0;
   btFetching = true;
 
-  // Fetch one page starting at `start`. Uses fetch() with a manual timeout so a
-  // stalled request doesn't hang the pagination loop indefinitely.
-  const fetchPage = (startMs, gran) => new Promise((resolve, reject) => {
+  // Fetch one page. Uses fetch() with a manual timeout so a stalled request
+  // doesn't hang the pool indefinitely.
+  const fetchPage = (pageStartMs) => new Promise((resolve, reject) => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-      reject(new Error('Binance request timed out after 25s'));
-    }, 25000);
-    const url = `${_binanceRestBase()}?symbol=${BINANCE_SYMBOL}&interval=${gran}&startTime=${startMs}&endTime=${endMs}&limit=1000`;
+      reject(new Error('Binance request timed out after 20s'));
+    }, 20000);
+    const pageEndMs = Math.min(pageStartMs + pageSpanMs - 1, endMs);
+    const url = `${_binanceRestBase()}?symbol=${BINANCE_SYMBOL}&interval=${interval}&startTime=${pageStartMs}&endTime=${pageEndMs}&limit=${PAGE_BARS}`;
     fetch(url, { signal: controller.signal })
       .then(res => {
         clearTimeout(timer);
@@ -7911,7 +8239,7 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
         return res.json();
       })
       .then(data => {
-        if (!data) return;
+        if (!data) { resolve([]); return; }
         resolve(data.map(c => ({
           epoch: Math.floor(c[0] / 1000), open: +c[1], high: +c[2], low: +c[3], close: +c[4]
         })));
@@ -7919,48 +8247,45 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
       .catch(e => { clearTimeout(timer); reject(e); });
   });
 
-  try {
-    while (cursorMs < endMs && !btCancelled && reqCount < MAX_PAGES) {
-      let chunk = null;
-      // Retry each page up to 3 times with exponential back-off so a transient
-      // Binance rate-limit or connection drop doesn't abort the entire fetch.
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          chunk = await fetchPage(cursorMs, interval);
-          break; // success
-        } catch(e) {
-          if (attempt === 3) {
-            addSignal('warn', `BT fetch error (page ${reqCount + 1}, attempt ${attempt}): ${e.message} — stopping pagination`, null);
-            chunk = null;
-          } else {
-            addSignal('info', `BT fetch retry ${attempt}/3 (page ${reqCount + 1}): ${e.message}`, null);
-            await new Promise(r => setTimeout(r, 800 * attempt));
-          }
+  // Retry a single page up to 3 times with exponential back-off so a
+  // transient Binance rate-limit or connection drop doesn't abort the whole
+  // fetch — but doesn't block any other in-flight page while it retries.
+  const fetchWithRetry = async (pageStartMs, pageIdx) => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (btCancelled) return [];
+      try {
+        return await fetchPage(pageStartMs);
+      } catch (e) {
+        if (attempt === 3) {
+          addSignal('warn', `BT fetch error (page ${pageIdx + 1}/${pageStarts.length}): ${e.message}`, null);
+          return [];
         }
+        await new Promise(r => setTimeout(r, 400 * attempt));
       }
-      if (!chunk || !chunk.length) break;
-
-      // Accumulate — already scoped to [startEpoch, endEpoch] by the request itself
-      all.push(...chunk);
-
-      reqCount++;
-      if (onProgress) onProgress(reqCount, chunk.length);
-
-      const lastBar = chunk[chunk.length - 1];
-      // Fewer than a full page back means we've reached the end of available data.
-      if (chunk.length < 1000) break;
-
-      // Move cursor forward past the last bar in this chunk and fetch the next page.
-      cursorMs = (lastBar.epoch + granularity) * 1000;
-      if (cursorMs >= endMs) break;
-      await new Promise(r => setTimeout(r, 300)); // polite rate limit
     }
+    return [];
+  };
+
+  let nextPage = 0;
+  async function worker() {
+    while (nextPage < pageStarts.length && !btCancelled) {
+      const pageIdx = nextPage++;
+      results[pageIdx] = await fetchWithRetry(pageStarts[pageIdx], pageIdx);
+      completedPages++;
+      if (onProgress) onProgress(completedPages, pageStarts.length);
+    }
+  }
+
+  try {
+    const poolSize = Math.min(CONCURRENCY, pageStarts.length) || 1;
+    await Promise.all(Array.from({ length: poolSize }, worker));
   } finally {
     btFetching = false;
   }
 
+  const all = results.flat().filter(Boolean);
   all.sort((a, b) => a.epoch - b.epoch);
-  const filtered = all.filter((c, i, arr) => i === 0 || c.epoch !== arr[i-1].epoch);
+  const filtered = all.filter((c, i, arr) => i === 0 || c.epoch !== arr[i - 1].epoch);
   if (filtered.length < 100) {
     addSignal('warn', `BT data: only ${filtered.length} bars returned. Binance may have limited history for this date range.`, null);
   }
@@ -7995,6 +8320,7 @@ async function startBacktest() {
   if (btRunning) return;
   const startBal = parseFloat($('btStartBal').value);
   const profitTarget = parseFloat($('btProfitTarget').value);
+  const riskPctInput = parseFloat($('btRiskPct').value);
   const fromVal = $('btDateFrom').value.trim();
   const toVal = $('btDateTo').value.trim();
   const startEpoch = parseDDMMYYYY(fromVal);
@@ -8005,10 +8331,21 @@ async function startBacktest() {
     addSignal('warn', 'Backtest: check all fields (dates must be DD-MM-YYYY)', null);
     return;
   }
+  if (!(riskPctInput > 0)) {
+    addSignal('warn', 'Backtest: enter a Risk per Trade % (0.1–5.0)', null);
+    return;
+  }
   if (endEpoch < startEpoch) {
     addSignal('warn', 'Backtest: End date must be same or after start date', null);
     return;
   }
+
+  // Apply the backtest's Risk per Trade to CFG so checkRiskOverflow() — the
+  // single source of truth for live/demo/backtest sizing — actually uses it.
+  // Also mirrors it back into the live Config screen, matching the field hint.
+  CFG.RISK_PCT = Math.min(Math.max(riskPctInput, 0.1), SAFETY.MAX_RISK_CAP_PCT);
+  if ($('cfgRiskPct')) $('cfgRiskPct').value = CFG.RISK_PCT;
+  if ($('riskDisplay')) $('riskDisplay').textContent = CFG.RISK_PCT.toFixed(1) + '%';
 
   // Calculate days for display
   btSelectedDays = Math.ceil((endEpoch - startEpoch) / 86400) + 1;
@@ -8019,8 +8356,9 @@ async function startBacktest() {
   $('btProgressWrap').style.display = 'block';
   $('btResults').style.display = 'none';
   setBtProgress(2, `Fetching ${btSelectedDays} day(s) of historical candles…`);
-  const m1All = await fetchBtCandles(60, startEpoch, endEpoch, (n) => {
-    setBtProgress(Math.min(35, 2 + n * 2), `Fetching batch ${n}…`);
+  const m1All = await fetchBtCandles(60, startEpoch, endEpoch, (completed, total) => {
+    const pct = total > 0 ? completed / total : 0;
+    setBtProgress(Math.min(35, 2 + pct * 33), `Fetching candles… ${completed}/${total} pages`);
   });
 
   if (btCancelled || !m1All || m1All.length < 120) {
@@ -8569,24 +8907,26 @@ function _scanGapPositions() {
         const ph = pos.trailPhase || 0;
         if (isBuy) {
           if (price <= pos.slPrice) {
-            const raw = calcClosePnL(pos, pos.slPrice);
+            const exitReason = ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL';
+            const raw = calcClosePnL(pos, pos.slPrice, exitReason);
             const pnl = ph >= 1 ? Math.max(0, raw) : raw;
-            closeData.push({ pos, pnl, reason: ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL', atPrice: pos.slPrice });
+            closeData.push({ pos, pnl, reason: exitReason, atPrice: pos.slPrice });
             break;
           }
           if (!runnerMode && price >= pos.tpPrice) {
-            closeData.push({ pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP', atPrice: pos.tpPrice });
+            closeData.push({ pos, pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP', atPrice: pos.tpPrice });
             break;
           }
         } else {
           if (price >= pos.slPrice) {
-            const raw = calcClosePnL(pos, pos.slPrice);
+            const exitReason = ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL';
+            const raw = calcClosePnL(pos, pos.slPrice, exitReason);
             const pnl = ph >= 1 ? Math.max(0, raw) : raw;
-            closeData.push({ pos, pnl, reason: ph >= 2 ? 'TRAIL' : ph >= 1 ? 'BE' : 'SL', atPrice: pos.slPrice });
+            closeData.push({ pos, pnl, reason: exitReason, atPrice: pos.slPrice });
             break;
           }
           if (!runnerMode && price <= pos.tpPrice) {
-            closeData.push({ pos, pnl: calcClosePnL(pos, pos.tpPrice), reason: 'TP', atPrice: pos.tpPrice });
+            closeData.push({ pos, pnl: calcClosePnL(pos, pos.tpPrice, 'TP'), reason: 'TP', atPrice: pos.tpPrice });
             break;
           }
         }
@@ -8605,6 +8945,8 @@ function _scanGapPositions() {
     const savedMid = mid;
     mid = atPrice; // log will show the actual hit price, not the current stale mid
     demoPositions = demoPositions.filter(p => p.id !== pos.id);
+    const swapCost = calcSwapCost(pos, pos.openTime, Date.now());
+    pnl += swapCost;
     demoBalance = Math.max(0, demoBalance + (isNaN(pnl) ? 0 : pnl));
     sessionPnL += pnl;
     checkProfitLock();
