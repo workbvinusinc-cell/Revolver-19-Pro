@@ -8009,10 +8009,25 @@ const replay = {
     // and backtest sizing still matches live via the same shared factors.
     let riskPct = riskCheck.riskPct * ns.lotMult;
     if (this.replayRiskHalved) riskPct /= 2;
-    const slAmount = this.replayBal * riskPct / 100 * riskCheck.sizeMult;
-    const tpAmount = +(slAmount * rr).toFixed(2);
-    let lots = +(slAmount / (slDist * CONTRACT_SIZE)).toFixed(2);
+    const rawRisk = this.replayBal * riskPct / 100 * riskCheck.sizeMult;
+    let lots = +(rawRisk / (slDist * CONTRACT_SIZE)).toFixed(2);
     lots = Math.max(CFG.MIN_LOT_SIZE, Math.min(CFG.MAX_LOT_CAP, lots));
+
+    // BUG FIX: the live open flow computes slAmount AFTER clamping lots
+    // (slAmount = adjLots * CONTRACT_SIZE * slDist) — the backtest path used
+    // to store the pre-clamp `rawRisk` figure instead, so once a run's
+    // balance grew large enough for %-of-balance sizing to call for more
+    // than MAX_LOT_CAP lots (200 by default — trivial once balance passes
+    // roughly slDist × 8000, e.g. ~$160k at a $20 stop), every capped trade
+    // from that point on recorded a risk/R-multiple figure far bigger than
+    // what was actually staked, since the position was silently shrunk to
+    // the cap but its "risk" label never was. Recomputing from the final
+    // (clamped) lots here — exactly mirroring live — keeps risk reporting
+    // honest for the entire back half of a compounding run once sizing
+    // pins at the cap, rather than only for the early trades before it
+    // does.
+    const slAmount = lots * CONTRACT_SIZE * slDist;
+    const tpAmount = +(slAmount * rr).toFixed(2);
 
     const _openRisk = slAmount || Math.abs(entryPrice - slPrice) * lots * CONTRACT_SIZE;
     const pos = {
