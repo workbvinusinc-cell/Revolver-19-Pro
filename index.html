@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<meta name="theme-color" content="#060608"/>
+<meta name="theme-color" content="#14141b"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-title" content="PA Bot"/>
 <title>BTCUSD · PA Bot</title>
@@ -12,12 +12,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@600;800&display=swap" rel="stylesheet"/>
 <style>
 :root{
-  --bg:#060608;--bg2:#0d0d12;--bg3:#13131c;--bg4:#0a0a10;
-  --border:#1c1c28;--border2:#242436;
-  --gold:#f5a623;--gold2:#c17d10;--gold-glow:rgba(245,166,35,0.15);
-  --green:#00d4aa;--green-dim:rgba(0,212,170,0.12);--green-border:rgba(0,212,170,0.25);
-  --red:#ff4455;--red-dim:rgba(255,68,85,0.12);--red-border:rgba(255,68,85,0.25);
-  --text:#e8e8f2;--text2:#8888aa;--text3:#3a3a58;
+  --bg:#14141b;--bg2:#1a1a23;--bg3:#20202a;--bg4:#181820;
+  --border:#2b2b38;--border2:#34344a;
+  --gold:#e3ad4c;--gold2:#b98a3c;--gold-glow:rgba(227,173,76,0.15);
+  --green:#4ecdae;--green-dim:rgba(78,205,174,0.12);--green-border:rgba(78,205,174,0.25);
+  --red:#f2606c;--red-dim:rgba(242,96,108,0.12);--red-border:rgba(242,96,108,0.25);
+  --text:#dcdce6;--text2:#9d9dc0;--text3:#8282af;
   --mono:'Space Mono',monospace;--sans:'Syne',sans-serif;
   --bar-h:52px;--stats-h:68px;
 }
@@ -71,7 +71,7 @@ html,body{
 .badge-session.active{border-color:var(--gold2);color:var(--gold)}
 .conn{display:flex;align-items:center;gap:4px;font-size:9px;color:var(--text2);flex-shrink:0}
 .dot{width:6px;height:6px;border-radius:50%;background:var(--text3);flex-shrink:0;transition:all .3s}
-.dot.on{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s ease-in-out infinite}
+.dot.on{background:var(--green);box-shadow:0 0 5px var(--green);animation:blink 2s ease-in-out infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.35}}
 .bar-right{display:flex;align-items:center;gap:8px;margin-left:auto}
 .bar-item{display:flex;flex-direction:column;align-items:flex-end}
@@ -174,8 +174,8 @@ html,body{
 .flash-overlay{
   position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .1s;
 }
-.flash-overlay.buy-flash{background:linear-gradient(135deg,rgba(0,212,170,.06),transparent);opacity:1}
-.flash-overlay.sell-flash{background:linear-gradient(135deg,rgba(255,68,85,.06),transparent);opacity:1}
+.flash-overlay.buy-flash{background:linear-gradient(135deg,rgba(78,205,174,.06),transparent);opacity:1}
+.flash-overlay.sell-flash{background:linear-gradient(135deg,rgba(242,96,108,.06),transparent);opacity:1}
 .drawer-overlay{
   position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:90;
   opacity:0;pointer-events:none;transition:opacity .25s;
@@ -268,8 +268,8 @@ input[type=range]::-webkit-slider-thumb{
 }
 .sig-badge.buy{background:var(--green-dim);color:var(--green);border-color:var(--green-border)}
 .sig-badge.sell{background:var(--red-dim);color:var(--red);border-color:var(--red-border)}
-.sig-badge.info{background:var(--gold-glow);color:var(--gold);border-color:rgba(245,166,35,.2)}
-.sig-badge.warn{background:rgba(255,68,85,.08);color:#ff8899;border-color:rgba(255,68,85,.15)}
+.sig-badge.info{background:var(--gold-glow);color:var(--gold);border-color:rgba(227,173,76,.2)}
+.sig-badge.warn{background:rgba(242,96,108,.08);color:#f4909c;border-color:rgba(242,96,108,.15)}
 .sig-t{color:var(--text3);font-size:9px;flex-shrink:0}
 .sig-txt{color:var(--text2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sig-p{color:var(--text);font-size:10px;flex-shrink:0}
@@ -312,7 +312,7 @@ input[type=range]::-webkit-slider-thumb{
 }
 .demo-notice strong{font-family:var(--sans);font-size:10px;display:block;margin-bottom:3px}
 .deposit-notice{
-  background:linear-gradient(135deg,rgba(245,166,35,.08),rgba(245,166,35,.03));
+  background:linear-gradient(135deg,rgba(227,173,76,.08),rgba(227,173,76,.03));
   border:1px solid var(--gold2);border-radius:8px;
   padding:16px 14px;margin-bottom:20px;text-align:center;
   display:none;
@@ -352,8 +352,8 @@ input[type=range]::-webkit-slider-thumb{
   padding:1px 5px;border-radius:2px;font-family:var(--sans);
   font-size:7.5px;font-weight:700;letter-spacing:.05em;border:1px solid;display:none;
 }
-.sb-badge.reduced{display:inline-block;background:rgba(245,166,35,.1);color:var(--gold);border-color:var(--gold2)}
-.sb-badge.locked{display:inline-block;background:rgba(255,68,85,.1);color:var(--red);border-color:rgba(255,68,85,.35);animation:blink 1s ease-in-out infinite}
+.sb-badge.reduced{display:inline-block;background:rgba(227,173,76,.1);color:var(--gold);border-color:var(--gold2)}
+.sb-badge.locked{display:inline-block;background:rgba(242,96,108,.1);color:var(--red);border-color:rgba(242,96,108,.35);animation:blink 1s ease-in-out infinite}
 @media(max-width:600px){.safety-band{height:18px;padding:0 8px;font-size:7.5px;gap:6px}}
 .start-toast-link{
   color:var(--gold);text-decoration:underline;cursor:pointer;
@@ -500,7 +500,7 @@ input[type=range]::-webkit-slider-thumb{
     <div class="bar-badges">
       <span class="badge badge-session" id="sessBadge">OFF-SESSION</span>
       <span class="badge badge-demo" id="modeBadge">DEMO</span>
-      <span class="badge" style="border-color:rgba(245,166,35,0.4);color:var(--gold);background:rgba(245,166,35,0.08)" id="exnessBadge">EXNESS STD</span>
+      <span class="badge" style="border-color:rgba(227,173,76,0.4);color:var(--gold);background:rgba(227,173,76,0.08)" id="exnessBadge">EXNESS STD</span>
     </div>
     <div class="bar-right">
       <div id="tBidWrap" class="bar-item"><em>Bid</em><strong id="tBid">—</strong></div>
@@ -593,12 +593,12 @@ input[type=range]::-webkit-slider-thumb{
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(255,200,100,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">NY/Overlap</span></span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(180,100,255,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">Asian</span></span>
   <span class="sb-sep">·</span>
-  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(0,212,170,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1+OB</span></span>
-  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(255,68,85,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1−OB</span></span>
+  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(78,205,174,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1+OB</span></span>
+  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(242,96,108,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M1−OB</span></span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(34,187,255,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M5+FVG</span></span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(255,136,51,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">M5−FVG</span></span>
   <span class="sb-sep">·</span>
-  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(0,212,170,0.2);border:1px dashed rgba(0,212,170,0.7);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">Entry 20–50%</span></span>
+  <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(78,205,174,0.2);border:1px dashed rgba(78,205,174,0.7);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">Entry 20–50%</span></span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="font-size:8px;color:var(--text3)">G1–G6</span><span style="color:var(--text3)">Gates</span></span>
   <span class="sb-sep">·</span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(68,255,136,0.3);display:inline-block;border-radius:1px;border:1px dashed rgba(68,255,136,0.5)"></span><span style="color:var(--text3)">M15+OB</span></span>
@@ -4591,12 +4591,12 @@ const strategy = {
 function drawChart(overridePositions = null, overrideMid = null) {
   const W = cv.width / DPR, H = cv.height / DPR;
   ctx.clearRect(0,0,W,H);
-  ctx.fillStyle = '#060608';
+  ctx.fillStyle = '#14141b';
   ctx.fillRect(0,0,W,H);
 
   const data = candles[currentTF];
   if (data.length < 2) {
-    ctx.fillStyle = '#3a3a58'; ctx.font = '11px "Space Mono"';
+    ctx.fillStyle = '#8282af'; ctx.font = '11px "Space Mono"';
     ctx.textAlign = 'center';
     ctx.fillText('Loading candle data…', W/2, H/2);
     return;
@@ -4665,7 +4665,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const y = PAD.t + (cH / ROWS) * i;
     ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + cW, y); ctx.stroke();
     const p = maxP - (span / ROWS) * i;
-    ctx.fillStyle = '#3a3a58'; ctx.font = '8px "Space Mono"'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#8282af'; ctx.font = '8px "Space Mono"'; ctx.textAlign = 'left';
     ctx.fillText(p.toFixed(2), PAD.l + cW + 3, y + 3);
   }
 
@@ -4678,10 +4678,10 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const eq  = (eqH + eqL) / 2;
     if (eq > minP && eq < maxP) {
       ctx.save();
-      ctx.strokeStyle='rgba(245,166,35,.45)'; ctx.lineWidth=1; ctx.setLineDash([5,5]);
+      ctx.strokeStyle='rgba(227,173,76,.45)'; ctx.lineWidth=1; ctx.setLineDash([5,5]);
       ctx.beginPath(); ctx.moveTo(PAD.l, toY(eq)); ctx.lineTo(PAD.l+cW, toY(eq)); ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle='rgba(245,166,35,.70)'; ctx.font='8px "Space Mono"'; ctx.textAlign='left';
+      ctx.fillStyle='rgba(227,173,76,.70)'; ctx.font='8px "Space Mono"'; ctx.textAlign='left';
       ctx.fillText('M15 EQ', PAD.l+cW+3, toY(eq)-2);
       ctx.restore();
     }
@@ -4708,7 +4708,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const labelW = ctx.measureText(label).width + 8;
     const labelX = Math.min(PAD.l + cW - labelW - 4, PAD.l + cW - 40);
     const labelY = Math.min(Math.max(y1 + 12, PAD.t + 10), PAD.t + cH - 4);
-    ctx.fillStyle = 'rgba(6,6,10,0.85)';
+    ctx.fillStyle = 'rgba(20,20,27,0.85)';
     ctx.beginPath();
     ctx.roundRect(labelX, labelY - 9, labelW, 12, 2);
     ctx.fill();
@@ -4744,7 +4744,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const labelW = ctx.measureText(label).width + 8;
     const labelX = Math.min(PAD.l + cW - labelW - 4, PAD.l + cW - 35);
     const labelY = Math.min(Math.max(y1 + 12, PAD.t + 10), PAD.t + cH - 4);
-    ctx.fillStyle = 'rgba(6,6,10,0.85)';
+    ctx.fillStyle = 'rgba(20,20,27,0.85)';
     ctx.beginPath();
     ctx.roundRect(labelX, labelY - 9, labelW, 12, 2);
     ctx.fill();
@@ -4778,7 +4778,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const baseX = PAD.l + 8;
     const baseY = PAD.t + 10;
     const pillW = 28, pillH = 22, gap = 4;
-    const activeCol = isBuy ? '#00d4aa' : '#ff4455';
+    const activeCol = isBuy ? '#4ecdae' : '#f2606c';
     const signalFiring = gates[5]; // G6 = signal
 
     ctx.save();
@@ -4786,8 +4786,8 @@ function drawChart(overridePositions = null, overrideMid = null) {
       const x = baseX + i * (pillW + gap);
       const y = baseY;
       // Background pill
-      ctx.fillStyle = passed ? (activeCol + '22') : 'rgba(6,6,10,0.70)';
-      ctx.strokeStyle = signalFiring ? '#f5a623' : (passed ? activeCol : '#1c1c28');
+      ctx.fillStyle = passed ? (activeCol + '22') : 'rgba(20,20,27,0.70)';
+      ctx.strokeStyle = signalFiring ? '#e3ad4c' : (passed ? activeCol : '#2b2b38');
       ctx.lineWidth = signalFiring && i === 5 ? 1.5 : 0.8;
       ctx.beginPath();
       ctx.roundRect(x, y, pillW, pillH, 3);
@@ -4796,11 +4796,11 @@ function drawChart(overridePositions = null, overrideMid = null) {
       // Gate number
       ctx.font = 'bold 7px "Space Mono"';
       ctx.textAlign = 'center';
-      ctx.fillStyle = passed ? activeCol : '#3a3a58';
+      ctx.fillStyle = passed ? activeCol : '#8282af';
       ctx.fillText(`G${i+1}`, x + pillW / 2, y + 9);
       // Checkmark or dot
       ctx.font = '7px "Space Mono"';
-      ctx.fillStyle = passed ? activeCol : '#3a3a58';
+      ctx.fillStyle = passed ? activeCol : '#8282af';
       ctx.fillText(passed ? '✓' : '·', x + pillW / 2, y + 18);
     });
 
@@ -4808,7 +4808,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const labelX = baseX + 6 * (pillW + gap) + 4;
     ctx.font = 'bold 8px "Space Mono"';
     ctx.textAlign = 'left';
-    ctx.fillStyle = signalFiring ? '#f5a623' : (count > 0 ? activeCol + 'aa' : '#3a3a58');
+    ctx.fillStyle = signalFiring ? '#e3ad4c' : (count > 0 ? activeCol + 'aa' : '#8282af');
     ctx.fillText(signalFiring ? (isBuy ? '▲ FIRE' : '▼ FIRE') : (isBuy ? `▲ ${count}/6` : `▼ ${count}/6`), labelX, baseY + 14);
     ctx.restore();
   })();
@@ -4835,7 +4835,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
         bandLow  = zone.high - size * bandMax;
         bandHigh = zone.high - size * bandMin;
       }
-      const col = isBull ? '#00d4aa' : '#ff4455';
+      const col = isBull ? '#4ecdae' : '#f2606c';
       const y1 = toY(bandHigh), y2 = toY(bandLow);
       if (y2 < PAD.t || y1 > PAD.t + cH) return;
       ctx.save();
@@ -4862,7 +4862,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
       const tagW = ctx.measureText(tag).width + 8;
       const tagX = PAD.l + CANDLE_AREA_W - tagW - 4;
       const tagY = meanY;
-      ctx.fillStyle = 'rgba(6,6,10,0.90)';
+      ctx.fillStyle = 'rgba(20,20,27,0.90)';
       ctx.beginPath(); ctx.roundRect(tagX, tagY - 9, tagW, 12, 2); ctx.fill();
       ctx.strokeStyle = col + '50'; ctx.lineWidth = 0.5; ctx.stroke();
       ctx.fillStyle = col; ctx.textAlign = 'left';
@@ -4878,8 +4878,8 @@ function drawChart(overridePositions = null, overrideMid = null) {
   })();
 
   // ── STANDARD M1 OB / FVG ZONES ──
-  drawZone(strategy.bullishOB(),     '#00d4aa', '+OB');
-  drawZone(strategy.bearishOB(),     '#ff4455', '-OB');
+  drawZone(strategy.bullishOB(),     '#4ecdae', '+OB');
+  drawZone(strategy.bearishOB(),     '#f2606c', '-OB');
   drawZone(strategy.bullishFVGZone(),'#22bbff', '+FVG');
   drawZone(strategy.bearishFVGZone(),'#ff8833', '-FVG');
   // Marks a SPECIFIC candle (not just its price level) as the origin of a
@@ -4909,7 +4909,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     // Position label well above the candle to avoid trade line overlap
     const labelY = Math.max(y1 - 18, PAD.t + 14);
     // Background pill for readability
-    ctx.fillStyle = 'rgba(6,6,10,0.92)';
+    ctx.fillStyle = 'rgba(20,20,27,0.92)';
     ctx.beginPath();
     ctx.roundRect(x - tagW / 2, labelY - 9, tagW, 12, 2);
     ctx.fill();
@@ -4928,8 +4928,8 @@ function drawChart(overridePositions = null, overrideMid = null) {
     ctx.fill();
     ctx.restore();
   }
-  markStructureCandle(strategy.bullishOBCandle2(), '#00d4aa', '+OB');
-  markStructureCandle(strategy.bearishOBCandle2(), '#ff4455', '-OB');
+  markStructureCandle(strategy.bullishOBCandle2(), '#4ecdae', '+OB');
+  markStructureCandle(strategy.bearishOBCandle2(), '#f2606c', '-OB');
 
   // ── BMS / LQ SWEEP STRUCTURE MARKERS ──
   // Draws the specific candle that triggered each event (via markStructureCandle
@@ -4963,7 +4963,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
         ? PAD.l + CANDLE_AREA_W - tagW - 2
         : PAD.l + 2;
       const tagY = y - 2;
-      ctx.fillStyle = 'rgba(6,6,8,0.88)';
+      ctx.fillStyle = 'rgba(20,20,27,0.88)';
       ctx.beginPath();
       ctx.roundRect(tagX, tagY - 8, tagW, 11, 2);
       ctx.fill();
@@ -4976,8 +4976,8 @@ function drawChart(overridePositions = null, overrideMid = null) {
     // ── BULLISH STRUCTURE ──
     if (bullBMS && bullBMS.valid) {
       // LQ — the specific M5 sweep candle, plus the swept swing-low level it grabbed
-      markStructureCandle(bullBMS.sweep.candle, '#00d4aa', 'LQ');
-      structLine(bullBMS.sweepLow, 'rgba(0,212,170,0.70)', 'LQ', 'right');
+      markStructureCandle(bullBMS.sweep.candle, '#4ecdae', 'LQ');
+      structLine(bullBMS.sweepLow, 'rgba(78,205,174,0.70)', 'LQ', 'right');
       // BMS — the specific M1 break candle, plus the actual swing level it broke
       // (bms.level — the real value detectStructureShift checks, not a proxy)
       markStructureCandle(bullBMS.bmsCandle, '#44ffb4', 'BMS');
@@ -4987,8 +4987,8 @@ function drawChart(overridePositions = null, overrideMid = null) {
     // ── BEARISH STRUCTURE ──
     if (bearBMS && bearBMS.valid) {
       // LQ — the specific M5 sweep candle, plus the swept swing-high level it grabbed
-      markStructureCandle(bearBMS.sweep.candle, '#ff4455', 'LQ');
-      structLine(bearBMS.sweepHigh, 'rgba(255,68,85,0.70)', 'LQ', 'right');
+      markStructureCandle(bearBMS.sweep.candle, '#f2606c', 'LQ');
+      structLine(bearBMS.sweepHigh, 'rgba(242,96,108,0.70)', 'LQ', 'right');
       // BMS — the specific M1 break candle, plus the actual swing level it broke
       markStructureCandle(bearBMS.bmsCandle, '#ff7888', 'BMS');
       structLine(bearBMS.bms.level, 'rgba(255,120,136,0.65)', 'BMS', 'left');
@@ -5019,7 +5019,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
       if (pnlColor && sepIdx !== -1) {
         const staticPart = leftLabel.slice(0, sepIdx);
         const pnlPart = leftLabel.slice(sepIdx);
-        ctx.fillStyle = 'rgba(6,6,10,0.90)';
+        ctx.fillStyle = 'rgba(20,20,27,0.90)';
         ctx.beginPath();
         ctx.roundRect(lx - 3, ly - 10, bgW, 15, 3);
         ctx.fill();
@@ -5032,7 +5032,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
         ctx.fillStyle = pnlColor;
         ctx.fillText(pnlPart, lx + staticW, ly);
       } else {
-        ctx.fillStyle = 'rgba(6,6,10,0.90)';
+        ctx.fillStyle = 'rgba(20,20,27,0.90)';
         ctx.beginPath();
         ctx.roundRect(lx - 3, ly - 10, bgW, 15, 3);
         ctx.fill();
@@ -5049,7 +5049,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const priceStr = priceVal.toFixed(2);
     ctx.font = 'bold 9px "Space Mono"';
     const badgeW = ctx.measureText(priceStr).width + 12;
-    ctx.fillStyle = '#0a0a12';
+    ctx.fillStyle = '#181820';
     ctx.strokeStyle = color; ctx.lineWidth = 1;
     ctx.fillRect(badgeX, y - badgeH/2, badgeW, badgeH);
     ctx.strokeRect(badgeX, y - badgeH/2, badgeW, badgeH);
@@ -5067,7 +5067,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const entryPrice = pos.entry;
     const slPrice = pos.slPrice;
     const tpPrice = pos.tpPrice;
-    const slColor = pos.beTriggered ? '#f5a623' : MT5C.sl;
+    const slColor = pos.beTriggered ? '#e3ad4c' : MT5C.sl;
     const slLabel = pos.trailActive ? 'TRAIL' : pos.beTriggered ? 'BE' : 'SL';
 
     const livePnl = calcPnLForPos(pos, midForPnl);
@@ -5172,7 +5172,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
 
   // TIME AXIS
   const step = Math.max(1, Math.floor(vis.length / 5));
-  ctx.fillStyle = '#3a3a58'; ctx.font = '8px "Space Mono"'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#8282af'; ctx.font = '8px "Space Mono"'; ctx.textAlign = 'center';
   vis.forEach((c, i) => {
     if (i % step === 0 || i === vis.length - 1) {
       const x = PAD.l + (i + 0.5) * slotW + (CANDLE_AREA_W - totalSlots * slotW);
@@ -5183,7 +5183,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
   });
 
   if (chartOffset > 0) {
-    ctx.fillStyle = 'rgba(245,166,35,0.4)';
+    ctx.fillStyle = 'rgba(227,173,76,0.4)';
     ctx.font = '8px "Space Mono"'; ctx.textAlign = 'right';
     ctx.fillText(`◄ ${chartOffset}`, PAD.l + cW - 2, PAD.t + 12);
   }
@@ -8519,7 +8519,7 @@ function btExportRuns() {
   } catch {
     // Fallback: open in new tab
     const w = window.open('', '_blank');
-    w.document.write('<pre style="font-size:11px;background:#060608;color:#e8e8f2;padding:16px">' + JSON.stringify(exportData, null, 2) + '</pre>');
+    w.document.write('<pre style="font-size:11px;background:#14141b;color:#dcdce6;padding:16px">' + JSON.stringify(exportData, null, 2) + '</pre>');
   }
 }
 
@@ -8865,7 +8865,7 @@ function liveHistExport() {
     addSignal('info', `Live session history (${closed.length} trades) copied to clipboard`, null);
   } catch {
     const w = window.open('', '_blank');
-    w.document.write('<pre style="font-size:11px;background:#060608;color:#e8e8f2;padding:16px">' + JSON.stringify(data, null, 2) + '</pre>');
+    w.document.write('<pre style="font-size:11px;background:#14141b;color:#dcdce6;padding:16px">' + JSON.stringify(data, null, 2) + '</pre>');
   }
 }
 
@@ -8880,7 +8880,7 @@ function drawGenericEquityCurve(canvas, equity, startBal, cssH) {
   const c2 = canvas.getContext('2d');
   c2.scale(dpr, dpr);
   const W = cssW, H = cssH;
-  c2.fillStyle = '#0a0a10'; c2.fillRect(0, 0, W, H);
+  c2.fillStyle = '#181820'; c2.fillRect(0, 0, W, H);
   const min = Math.min(...equity); const max = Math.max(...equity);
   const rng = max - min || 1;
   const P = { t: 12, b: 8, l: 6, r: 6 };
@@ -8900,8 +8900,8 @@ function drawGenericEquityCurve(canvas, equity, startBal, cssH) {
     c2.fillText(`$${startBal.toFixed(0)}`, P.l + 2, baseY - 3);
   }
   const endBal = equity[equity.length - 1];
-  const lineCol  = endBal >= startBal ? '#00d4aa' : '#ff4455';
-  const fillAlpha= endBal >= startBal ? 'rgba(0,212,170,.08)' : 'rgba(255,68,85,.08)';
+  const lineCol  = endBal >= startBal ? '#4ecdae' : '#f2606c';
+  const fillAlpha= endBal >= startBal ? 'rgba(78,205,174,.08)' : 'rgba(242,96,108,.08)';
   // Fill
   c2.beginPath(); c2.moveTo(toX(0), toY(equity[0]));
   for (let i = 1; i < equity.length; i++) c2.lineTo(toX(i), toY(equity[i]));
