@@ -756,11 +756,11 @@ input[type=range]::-webkit-slider-thumb{
           <input type="checkbox" id="cfgProfitLockEnabled" checked/>
         </label>
         <div class="field-row">
-          <span style="font-size:11px;color:var(--text2)">Keep in play after 2nd hit:</span>
-          <input class="finput" type="number" id="cfgProfitLockKeepPct" placeholder="30" min="0" max="100" step="5" style="width:60px"/>
+          <span style="font-size:11px;color:var(--text2)">Subsequent Lock %:</span>
+          <input class="finput" type="number" id="cfgSubsequentLockPct" placeholder="70" min="0" max="100" step="5" style="width:60px"/>
           <span class="funit">%</span>
         </div>
-        <div class="field-hint">1st time the daily target is hit, 100% of that profit is locked away and the bot keeps trading on the reset balance. From the 2nd hit that day onward, only this % of each new profit chunk stays in play — the rest keeps getting locked. Hit count and progress reset every new day.</div>
+        <div class="field-hint">1st time the daily target is hit, 100% of that profit is locked away and the bot keeps trading on the reset balance. From the 2nd hit that day onward, this % of each new target-sized profit chunk is locked away — the rest stays in play. Hit count resets every new day; the vault itself never resets.</div>
       </div>
     </div>
     <div class="settings-section">
@@ -1194,10 +1194,12 @@ const CFG = {
   // that profit is swept into a separate locked vault and the working
   // trading balance drops back down — so a drawdown afterward can never eat
   // into money already banked. First hit locks 100% of the profit chunk.
-  // From the 2nd hit onward, only PROFIT_LOCK_KEEP_PCT of each new profit
-  // chunk stays in play (compounds forward); the rest keeps getting locked.
+  // From the 2nd hit onward, SUBSEQUENT_LOCK_PCT of each new target-sized
+  // profit chunk is locked away (the remainder stays in play and compounds
+  // forward). Applies only to the NEW chunk each time — never to the
+  // accumulated vault, which is never touched again once locked.
   PROFIT_LOCK_ENABLED: true,
-  PROFIT_LOCK_KEEP_PCT: 30,   // % of profit kept in the trading balance from the 2nd hit onward
+  SUBSEQUENT_LOCK_PCT: 70,   // % of each new target chunk locked away, from the 2nd hit of the day onward
   MAX_DD_PCT   : 5.0,
   WIN_RATE_TGT : 55,
   DEMO_BALANCE : 0,
@@ -5951,9 +5953,9 @@ function updateThreePhaseTrail(pos, currentPrice) {
 // working balance — the vault is never touched by position sizing.
 //
 //   1st hit of the day : 100% of that profit chunk is locked away.
-//   2nd hit of the day onward: only CFG.PROFIT_LOCK_KEEP_PCT (default 30%)
-//   of each new chunk stays in the working balance (compounds forward for
-//   further trading that day); the other 70% keeps getting locked.
+//   2nd hit of the day onward: CFG.SUBSEQUENT_LOCK_PCT (default 70%) of
+//   each new chunk is locked away; the remainder stays in the working
+//   balance and compounds forward for further trading that day.
 //
 // At the first check on a new calendar day, the baseline snaps forward to
 // that day's opening balance and the hit counter resets to 0 — so every day
@@ -5984,9 +5986,10 @@ function checkProfitLock() {
   while (demoBalance - profitLockBaseline >= target && guard < 50) {
     guard++;
     profitLockHits++;
-    const keepPct     = profitLockHits >= 2 ? Math.max(0, Math.min(100, CFG.PROFIT_LOCK_KEEP_PCT)) : 0;
-    const keepAmount  = target * (keepPct / 100);
-    const lockAmount  = target - keepAmount;
+    const lockPct     = profitLockHits >= 2 ? Math.max(0, Math.min(100, CFG.SUBSEQUENT_LOCK_PCT)) : 100;
+    const lockAmount  = target * (lockPct / 100);
+    const keepAmount  = target - lockAmount;
+    const keepPct     = 100 - lockPct;
 
     lockedProfit       += lockAmount;
     demoBalance        -= lockAmount;
@@ -6340,7 +6343,13 @@ function loadSettings() {
     if(saved.DEMO_BALANCE > 0) { CFG.DEMO_BALANCE = saved.DEMO_BALANCE; demoBalance = saved.DEMO_BALANCE; demoStartBal = saved.DEMO_BALANCE; }
     if(saved.PROFIT_TARGET) CFG.PROFIT_TARGET = saved.PROFIT_TARGET;
     if(saved.PROFIT_LOCK_ENABLED !== undefined) CFG.PROFIT_LOCK_ENABLED = saved.PROFIT_LOCK_ENABLED;
-    if(saved.PROFIT_LOCK_KEEP_PCT !== undefined) CFG.PROFIT_LOCK_KEEP_PCT = saved.PROFIT_LOCK_KEEP_PCT;
+    if(saved.SUBSEQUENT_LOCK_PCT !== undefined) {
+      CFG.SUBSEQUENT_LOCK_PCT = saved.SUBSEQUENT_LOCK_PCT;
+    } else if(saved.PROFIT_LOCK_KEEP_PCT !== undefined) {
+      // Migrate old "keep %" setting (pre-rename) to the new "lock %" meaning
+      // so an existing user's actual locked/kept split is preserved exactly.
+      CFG.SUBSEQUENT_LOCK_PCT = Math.max(0, Math.min(100, 100 - saved.PROFIT_LOCK_KEEP_PCT));
+    }
     // Profit-lock vault persists across reloads — it represents real banked profit.
     if(saved.lockedProfit)       lockedProfit       = saved.lockedProfit;
     if(saved.profitLockHits)     profitLockHits     = saved.profitLockHits;
@@ -6372,7 +6381,7 @@ function loadSettings() {
   $('cfgDemoBalance').value  = CFG.DEMO_BALANCE || '';
   $('cfgProfitTarget').value = CFG.PROFIT_TARGET || '';
   $('cfgProfitLockEnabled').checked = CFG.PROFIT_LOCK_ENABLED !== false;
-  $('cfgProfitLockKeepPct').value = CFG.PROFIT_LOCK_KEEP_PCT ?? 30;
+  $('cfgSubsequentLockPct').value = CFG.SUBSEQUENT_LOCK_PCT ?? 70;
   $('cfgRiskPct').value      = CFG.RISK_PCT;
   $('cfgWinRate').value      = CFG.WIN_RATE_TGT;
   $('cfgMaxDD').value        = CFG.MAX_DD_PCT;
@@ -6411,7 +6420,7 @@ function saveSettings() {
   CFG.DEMO_BALANCE  = newBal;
   CFG.PROFIT_TARGET = parseFloat($('cfgProfitTarget').value) || 0;
   CFG.PROFIT_LOCK_ENABLED = $('cfgProfitLockEnabled').checked;
-  CFG.PROFIT_LOCK_KEEP_PCT = Math.max(0, Math.min(100, parseFloat($('cfgProfitLockKeepPct').value) || 30));
+  CFG.SUBSEQUENT_LOCK_PCT = Math.max(0, Math.min(100, parseFloat($('cfgSubsequentLockPct').value) || 70));
   CFG.RISK_PCT      = parseFloat($('cfgRiskPct').value)  || 1.0;
   CFG.WIN_RATE_TGT  = parseInt($('cfgWinRate').value)    || 55;
   CFG.MAX_DD_PCT    = parseFloat($('cfgMaxDD').value)    || 5.0;
@@ -6438,7 +6447,7 @@ function saveSettings() {
   try {
     localStorage.setItem('pabotCFG', JSON.stringify({
       DEMO_BALANCE: CFG.DEMO_BALANCE, PROFIT_TARGET: CFG.PROFIT_TARGET,
-      PROFIT_LOCK_ENABLED: CFG.PROFIT_LOCK_ENABLED, PROFIT_LOCK_KEEP_PCT: CFG.PROFIT_LOCK_KEEP_PCT,
+      PROFIT_LOCK_ENABLED: CFG.PROFIT_LOCK_ENABLED, SUBSEQUENT_LOCK_PCT: CFG.SUBSEQUENT_LOCK_PCT,
       lockedProfit, profitLockHits, profitLockBaseline, profitLockDay,
       RISK_PCT: CFG.RISK_PCT, WIN_RATE_TGT: CFG.WIN_RATE_TGT,
       MAX_DD_PCT: CFG.MAX_DD_PCT, RR: CFG.RR, MAX_LOT_CAP: CFG.MAX_LOT_CAP,
@@ -7180,6 +7189,10 @@ const replay = {
   replayLastSigEpoch: 0,
   replayPosIdCounter: 0,
   replayProfitTarget: 0,
+  replayVault: 0,   // ── PROFIT LOCK VAULT (backtest) ──
+  // Permanently locked profit, mirroring live lockedProfit. NEVER used for
+  // position sizing, risk calc, margin, or trade calculations — checkRiskOverflow()
+  // is only ever passed this.replayBal (see _evaluateEntry below), never this + vault.
 
   start(m1All, m5All, startBal, profitTarget, newsEvents) {
     if (this.active) this.stop();
@@ -7252,6 +7265,7 @@ const replay = {
     this.replayProfitDay = null;
     this.replayProfitHits = 0;
     this.replayProfitHitsToday = 0;
+    this.replayVault = 0;   // vault NEVER resets except at the start of a brand-new backtest run
     this._enterReplayMode();
     // NOTE: _tick() schedules its own follow-up frame internally — calling
     // _scheduleNext() again here (as the old code did) started a second,
@@ -7420,14 +7434,18 @@ const replay = {
     this._checkReplayPositions(current);
 
     // ── DAILY PROFIT TARGET LOCK — resets every simulated calendar day ────
-    // Mirrors live checkProfitLock(): the target is measured against a
-    // baseline that resets to the current balance at the start of each new
-    // day (using the historical candle's own date, not wall-clock time,
-    // since backtests replay past dates). Every time the balance climbs a
-    // full target-sized increment above that day's baseline, it's logged as
-    // a lock/hit and the baseline steps forward — the bot is NEVER stopped
-    // by this, it just keeps compounding and can hit the target multiple
-    // times in a single day.
+    // Mirrors live checkProfitLock() exactly (same lock-percent logic, same
+    // first-hit-locks-100%-then-CFG.SUBSEQUENT_LOCK_PCT rule) so live and
+    // backtest never diverge. The target is measured against a baseline that
+    // resets to the current balance at the start of each new day (using the
+    // historical candle's own date, not wall-clock time, since backtests
+    // replay past dates). Every time the balance climbs a full target-sized
+    // increment above that day's baseline, the locked share of that chunk is
+    // swept out of replayBal into replayVault (permanently — vault money is
+    // never used for position sizing/risk/margin and never flows back into
+    // replayBal) and the baseline steps forward by whatever stayed in play —
+    // the bot is NEVER stopped by this, it just keeps trading on the reduced
+    // balance and can hit the target multiple times in a single day.
     if (this.replayProfitTarget > 0) {
       const dayKey = Math.floor(currentEpoch / 86400);
       if (this.replayProfitDay !== dayKey) {
@@ -7435,12 +7453,25 @@ const replay = {
         this.replayProfitBaseline = this.replayBal;
         this.replayProfitHitsToday = 0;
       }
-      while (this.replayBal - this.replayProfitBaseline >= this.replayProfitTarget) {
+      let _lockGuard = 0;
+      while (this.replayBal - this.replayProfitBaseline >= this.replayProfitTarget && _lockGuard < 50) {
+        _lockGuard++;
         this.replayProfitHitsToday++;
         this.replayProfitHits++;
-        this.replayProfitBaseline += this.replayProfitTarget;
+        const lockPct    = this.replayProfitHitsToday >= 2 ? Math.max(0, Math.min(100, CFG.SUBSEQUENT_LOCK_PCT)) : 100;
+        const lockAmount = this.replayProfitTarget * (lockPct / 100);
+        const keepAmount = this.replayProfitTarget - lockAmount;
+
+        // Atomic transfer: what leaves replayBal exactly equals what enters
+        // replayVault. Floored at 0 so replayBal can never go negative.
+        this.replayVault += lockAmount;
+        this.replayBal    = Math.max(0, this.replayBal - lockAmount);
+        this.replayProfitBaseline += keepAmount;
+
         addSignal('info',
-          `[BT] Daily profit target #${this.replayProfitHitsToday} ($${this.replayProfitTarget.toFixed(2)}) reached — locked, continuing to trade`, null);
+          `[BT] Daily profit target #${this.replayProfitHitsToday} hit — $${lockAmount.toFixed(2)} locked to vault` +
+          (keepAmount > 0 ? `, $${keepAmount.toFixed(2)} kept in play.` : '.') +
+          ` Vault total: $${this.replayVault.toFixed(2)}.`, null);
       }
       updateDailyTargetBar();
     }
@@ -8075,6 +8106,10 @@ const replay = {
       days: btSelectedDays, candles: this.data.length,
       profitTarget: this.replayProfitTarget,
       profitTargetHits: this.replayProfitHits || 0,
+      // ── Profit Lock Vault (backtest) ──
+      vault: this.replayVault || 0,
+      totalAccountValue: +(this.replayBal + (this.replayVault || 0)).toFixed(2),
+      subsequentLockPct: CFG.SUBSEQUENT_LOCK_PCT,
       // ── Extended run summary ──
       runTimestamp: Date.now(),
       pnlTotal: +pnlTotal.toFixed(2),
@@ -8513,14 +8548,71 @@ function renderBtResults(r) {
   const newsCount  = r.newsCount  ?? r.trades.filter(t => t.newsState && t.newsState !== 'NORMAL').length;
   const avgHoldBars = r.avgHoldBars ?? (r.trades.length ? Math.round(r.trades.reduce((s,t) => s + (t.holdBars||0), 0) / r.trades.length) : 0);
 
+  // ── Profit Lock Vault stats (backtest-only; never affects sizing) ──
+  const vault             = r.vault || 0;
+  const totalAccountValue = r.totalAccountValue ?? (r.endBal + vault);
+  const subsequentLockPct = r.subsequentLockPct ?? CFG.SUBSEQUENT_LOCK_PCT;
+
+  // ── Max Losing Streak ──
+  let maxLossStreak = 0, _curLossStreak = 0;
+  r.trades.forEach(t => { if (t.pnl < 0) { _curLossStreak++; maxLossStreak = Math.max(maxLossStreak, _curLossStreak); } else _curLossStreak = 0; });
+
+  // ── Avg R/Trade (pnl expressed as a multiple of that trade's risk $) ──
+  const rTrades = r.trades.filter(t => t.slAmount > 0);
+  const avgR = rTrades.length ? rTrades.reduce((s,t) => s + (t.pnl / t.slAmount), 0) / rTrades.length : 0;
+
   $('btResultGrid').innerHTML = `
     <div class="bt-result-card">
-      <span class="bt-result-lbl">Net PnL</span>
+      <span class="bt-result-lbl">Trading PnL</span>
       <span class="bt-result-val ${pnl>=0?'g':'r'}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
     </div>
     <div class="bt-result-card" style="grid-column:1/-1">
       <span class="bt-result-lbl">Daily Profit Target — $${r.profitTarget}${r.profitTarget > 0 ? ` · locked ${hits}× over ${days} day${days===1?'':'s'} (~${avgHitsPerDay.toFixed(1)}/day)` : ''}</span>
       <span class="bt-result-val ${hits>0?'g':'au'}" style="margin-top:4px">${r.profitTarget > 0 ? `${hits} lock${hits===1?'':'s'} — bot kept trading through every one` : 'No target set'}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Final Active Trading Balance</span>
+      <span class="bt-result-val">$${r.endBal.toFixed(2)}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Locked Backtest Vault</span>
+      <span class="bt-result-val au">$${vault.toFixed(2)}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Total Locked Profit</span>
+      <span class="bt-result-val au">$${vault.toFixed(2)}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Total Account Value</span>
+      <span class="bt-result-val">$${totalAccountValue.toFixed(2)}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Daily Target Hits</span>
+      <span class="bt-result-val au">~${avgHitsPerDay.toFixed(1)}/day</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Total Target Hits</span>
+      <span class="bt-result-val au">${hits}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Subsequent Lock %</span>
+      <span class="bt-result-val">${subsequentLockPct}%</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Locked Profit</span>
+      <span class="bt-result-val au">$${vault.toFixed(2)}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">SL Hits</span>
+      <span class="bt-result-val r">${r.slCount||slCount}</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Average R/Trade</span>
+      <span class="bt-result-val ${avgR>=0?'g':'r'}">${avgR>=0?'+':''}${avgR.toFixed(2)}R</span>
+    </div>
+    <div class="bt-result-card">
+      <span class="bt-result-lbl">Maximum Losing Streak</span>
+      <span class="bt-result-val ${maxLossStreak>=5?'r':'au'}">${maxLossStreak}</span>
     </div>
     <div class="bt-result-card">
       <span class="bt-result-lbl">Return</span>
