@@ -277,6 +277,52 @@ input[type=range]::-webkit-slider-thumb{
 .cond{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text2);padding:3px 0}
 .ci{width:12px;text-align:center;font-size:9px;transition:all .2s;flex-shrink:0}
 .ci.ok{color:var(--green)}.ci.no{color:var(--text3)}
+.gate-note{font-size:9px;color:var(--text3);line-height:1.5;margin:-2px 0 12px;padding-left:20px}
+
+/* ── STRENGTH GAUGE ── */
+.gauge{
+  display:flex;align-items:center;gap:14px;
+  background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+  padding:14px 16px;margin-bottom:18px;transition:border-color .3s,background .3s;
+}
+.gauge-num-wrap{
+  width:56px;height:56px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--bg4);border:2px solid var(--border2);
+  transition:border-color .3s,box-shadow .3s,color .3s;
+  font-family:var(--sans);font-weight:800;font-size:18px;color:var(--text3);
+}
+.gauge-body{flex:1;min-width:0}
+.gauge-label{
+  font-family:var(--sans);font-size:12px;font-weight:700;letter-spacing:.08em;
+  color:var(--text3);transition:color .3s;margin-bottom:4px;
+}
+.gauge-sub{font-size:9px;color:var(--text3);letter-spacing:.04em}
+.gauge-track{height:5px;border-radius:3px;background:var(--border2);margin-top:8px;overflow:hidden}
+.gauge-fill{height:100%;border-radius:3px;width:0%;background:var(--text3);transition:width .35s,background .35s}
+
+.gauge.gauge-neutral .gauge-num-wrap{border-color:var(--border2);color:var(--text3)}
+.gauge.gauge-neutral .gauge-label{color:var(--text2)}
+
+.gauge.gauge-lean-buy{border-color:var(--green-border)}
+.gauge.gauge-lean-buy .gauge-num-wrap{border-color:var(--green-border);color:var(--green)}
+.gauge.gauge-lean-buy .gauge-label{color:var(--green)}
+.gauge.gauge-lean-buy .gauge-fill{background:var(--green)}
+
+.gauge.gauge-lean-sell{border-color:var(--red-border)}
+.gauge.gauge-lean-sell .gauge-num-wrap{border-color:var(--red-border);color:var(--red)}
+.gauge.gauge-lean-sell .gauge-label{color:var(--red)}
+.gauge.gauge-lean-sell .gauge-fill{background:var(--red)}
+
+.gauge.gauge-buy{border-color:var(--green);background:linear-gradient(135deg,var(--green-dim),var(--bg3))}
+.gauge.gauge-buy .gauge-num-wrap{border-color:var(--green);color:var(--green);box-shadow:0 0 14px var(--green-dim)}
+.gauge.gauge-buy .gauge-label{color:var(--green)}
+.gauge.gauge-buy .gauge-fill{background:var(--green)}
+
+.gauge.gauge-sell{border-color:var(--red);background:linear-gradient(135deg,var(--red-dim),var(--bg3))}
+.gauge.gauge-sell .gauge-num-wrap{border-color:var(--red);color:var(--red);box-shadow:0 0 14px var(--red-dim)}
+.gauge.gauge-sell .gauge-label{color:var(--red)}
+.gauge.gauge-sell .gauge-fill{background:var(--red)}
 .pos-card{
   background:var(--bg3);border:1px solid var(--border2);border-radius:6px;
   padding:10px;margin-bottom:8px;
@@ -586,7 +632,6 @@ input[type=range]::-webkit-slider-thumb{
   <span class="sb-sep">·</span>
   <span class="sb-badge" id="sbNewsMode"></span>
   <span class="sb-badge" id="sbMode"></span>
-  <span class="sb-badge" id="sbPostTP" style="display:none;color:#7caaff;border-color:rgba(124,170,255,0.3);background:rgba(124,170,255,0.08)">⏳ POST-TP</span>
   <span class="sb-sep">·</span>
   <span style="color:var(--text3);font-size:8px;letter-spacing:.1em;flex-shrink:0">SESSION</span>
   <span style="display:flex;align-items:center;gap:3px;flex-shrink:0"><span style="width:8px;height:8px;background:rgba(100,180,255,0.4);display:inline-block;border-radius:1px"></span><span style="color:var(--text3)">London</span></span>
@@ -660,30 +705,43 @@ input[type=range]::-webkit-slider-thumb{
 
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">BUY Setup — Refined Liquidity/Structure 6-Gate Chain</div>
-      <div class="conds" id="buyConds">
-        <div class="cond" data-k="bSess"><span class="ci no">○</span>G0: Active Session (Asian / London / NY)</div>
-        <div class="cond" data-k="bKZ"><span class="ci no">○</span>Context: Kill Zone Active (Asian/London/NY KZ)</div>
-        <div class="cond" data-k="bSweep"><span class="ci no">○</span>G1: M5 Prior Swing Low Swept + Reclaimed (Liquidity Grab)</div>
-        <div class="cond" data-k="bBMS"><span class="ci no">○</span>G2: M1 Structure Shift Confirmed (BMS to upside)</div>
-        <div class="cond" data-k="bOB"><span class="ci no">○</span>G3: M1 Bullish Order Block Identified</div>
-        <div class="cond" data-k="bFVG"><span class="ci no">○</span>Bonus: M1 FVG Present (graded confluence, not mandatory)</div>
-        <div class="cond" data-k="bZone"><span class="ci no">○</span>G4: Price In Preferred Retracement Zone of OB</div>
-        <div class="cond" data-k="bEntry"><span class="ci no">○</span>G5: Quality Score Approved → SIGNAL</div>
+      <div class="settings-section-title">Signal Strength</div>
+      <div class="gauge gauge-neutral" id="strengthGauge">
+        <div class="gauge-num-wrap"><span id="strengthGaugeNum">0</span></div>
+        <div class="gauge-body">
+          <div class="gauge-label" id="strengthGaugeLabel">FORMING</div>
+          <div class="gauge-sub" id="strengthGaugeSub">Waiting on setup — no bias yet</div>
+          <div class="gauge-track"><div class="gauge-fill" id="strengthGaugeFill"></div></div>
+        </div>
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-section-title">SELL Setup — Refined Liquidity/Structure 6-Gate Chain</div>
-      <div class="conds" id="sellConds">
-        <div class="cond" data-k="sSess"><span class="ci no">○</span>G0: Active Session (Asian / London / NY)</div>
-        <div class="cond" data-k="sKZ"><span class="ci no">○</span>Context: Kill Zone Active (Asian/London/NY KZ)</div>
-        <div class="cond" data-k="sSweep"><span class="ci no">○</span>G1: M5 Prior Swing High Swept + Reclaimed (Liquidity Grab)</div>
-        <div class="cond" data-k="sBMS"><span class="ci no">○</span>G2: M1 Structure Shift Confirmed (BMS to downside)</div>
-        <div class="cond" data-k="sOB"><span class="ci no">○</span>G3: M1 Bearish Order Block Identified</div>
-        <div class="cond" data-k="sFVG"><span class="ci no">○</span>Bonus: M1 FVG Present (graded confluence, not mandatory)</div>
-        <div class="cond" data-k="sZone"><span class="ci no">○</span>G4: Price In Preferred Retracement Zone of OB</div>
-        <div class="cond" data-k="sEntry"><span class="ci no">○</span>G5: Quality Score Approved → SIGNAL</div>
+      <div class="settings-section-title">BUY Setup — Momentum Breakout + Quality Score Engine</div>
+      <div class="conds" id="buyConds">
+        <div class="cond" data-k="bSess"><span class="ci no">○</span>Context: M5 Trend Bias = BULL (soft filter, not mandatory)</div>
+        <div class="cond" data-k="bKZ"><span class="ci no">○</span>Context: Kill Zone Active (Asian/London/NY KZ)</div>
+        <div class="cond" data-k="bSweep"><span class="ci no">○</span>G1: M1 Momentum Breakout — candle closes above N-bar range with strong body</div>
+        <div class="cond" data-k="bBMS"><span class="ci no">○</span>G2: Market Regime OK (not DEAD / no-volatility)</div>
+        <div class="cond" data-k="bOB"><span class="ci no">○</span>G3: News Blackout Clear (outside high-impact release window)</div>
+        <div class="cond" data-k="bFVG"><span class="ci no">○</span>G4: Room-To-Run Confirmed (no wall within min ATR distance)</div>
+        <div class="cond" data-k="bZone"><span class="ci no">○</span>G5: No Rejection Wick (opposing wick under 35% of candle range)</div>
+        <div class="cond" data-k="bEntry"><span class="ci no">○</span>G6: Quality Score ≥ Grade Floor (B+/A/A+) → SIGNAL</div>
       </div>
+      <div class="gate-note">Counter-trend setups (against the M5 trend bias above) must clear the higher A-grade floor instead of B+.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">SELL Setup — Momentum Breakout + Quality Score Engine</div>
+      <div class="conds" id="sellConds">
+        <div class="cond" data-k="sSess"><span class="ci no">○</span>Context: M5 Trend Bias = BEAR (soft filter, not mandatory)</div>
+        <div class="cond" data-k="sKZ"><span class="ci no">○</span>Context: Kill Zone Active (Asian/London/NY KZ)</div>
+        <div class="cond" data-k="sSweep"><span class="ci no">○</span>G1: M1 Momentum Breakout — candle closes below N-bar range with strong body</div>
+        <div class="cond" data-k="sBMS"><span class="ci no">○</span>G2: Market Regime OK (not DEAD / no-volatility)</div>
+        <div class="cond" data-k="sOB"><span class="ci no">○</span>G3: News Blackout Clear (outside high-impact release window)</div>
+        <div class="cond" data-k="sFVG"><span class="ci no">○</span>G4: Room-To-Run Confirmed (no wall within min ATR distance)</div>
+        <div class="cond" data-k="sZone"><span class="ci no">○</span>G5: No Rejection Wick (opposing wick under 35% of candle range)</div>
+        <div class="cond" data-k="sEntry"><span class="ci no">○</span>G6: Quality Score ≥ Grade Floor (B+/A/A+) → SIGNAL</div>
+      </div>
+      <div class="gate-note">Counter-trend setups (against the M5 trend bias above) must clear the higher A-grade floor instead of B+.</div>
     </div>
   </div>
 </div>
@@ -1012,7 +1070,7 @@ input[type=range]::-webkit-slider-thumb{
   </div>
   <div class="drawer-body">
     <div class="bt-summary-note">
-      Replays your strategy on real historical BTCUSD data from Binance. Uses identical ICT/BMS rules, session filters, and risk management as live mode — no data advantage, no repainting. M5 HTF bias + M1 execution. Trades appear on chart during replay.<br><br>
+      Replays your strategy on real historical BTCUSD data from Binance. Uses the identical momentum-breakout + quality-score engine and risk management as live mode — no data advantage, no repainting. M5 trend bias + M1 execution. Trades appear on chart during replay.<br><br>
       <span style="color:var(--gold);font-family:var(--sans);font-size:8px;font-weight:700;letter-spacing:.08em">MARKET SIMULATION ACTIVE:</span><br>
       News-aware trading (ALL news types traded · lots ×0.60 at release · ×1.20 post-release) · Spread: $2.5–$8 typical, up to $18+ on news spikes (Exness Raw Spread BTCUSD) | Slippage: $0–$3 base, scaled up by order size and volatility | Execution delay: 20–120 ms, simulated on every fill | Commission: $4/lot round turn | Swap: -$15.48/lot/day long, tripled Friday (live Exness spec, only on trades held across rollover)
     </div>
@@ -1268,11 +1326,14 @@ let consecutiveWins   = 0;
 let tradingLocked     = false;
 let riskHalved        = false;
 
-// ── SURVIVAL ENGINE STATE ──
-// Escalating loss-streak protection beyond the basic risk-halving layer.
-// Independent of tradingLocked (which is DD-based) — this is streak-based.
-let survivalPauseUntil    = 0;     // ms — trading paused after 3 consec losses (1 hour)
-let survivalSessionLocked = false; // true after 4 consec losses — requires manual restart
+// (Survival Engine streak pause/lock removed on request — turned out to be
+// dead code anyway: survivalPauseUntil/survivalSessionLocked were declared
+// and rendered in the status badge, but nothing in the file ever actually
+// SET them past their initial 0/false, so the "pause after 3 losses" /
+// "lock after 4 losses" behavior the comments described had never fired.
+// The separate risk-halving-after-losses feature — SAFETY.CONSEC_LOSS_HALVE,
+// which shrinks position size rather than stopping trading — is untouched
+// and still active.)
 
 let authed = false, botOn = false;
 let bid = 0, ask = 0, mid = 0, prevMid = 0;
@@ -1306,10 +1367,9 @@ let _hiddenAt       = 0;     // timestamp when tab was hidden
 let _midAtHide      = 0;     // last known mid when tab went background
 let _gapCheckPending = false; // true after resume with open positions
 
-// ── POST-TP CONTINUATION STATE ──
-// After TP is hit, bot enters evaluation mode before re-entering.
-let postTPState = null;
-// postTPState = { dir:'UP'|'DOWN', time: ms, evalEndTime: ms, approved: bool }
+// (Post-TP continuation state removed on request — the bot must never
+// pause, wait, or cool down after a TP/SL/any close. It now re-evaluates
+// for the next signal on the very next tick, same as after any other exit.)
 
 // ── TRAILING STOP ENGINE ──
 // After BE is triggered, SL dynamically trails price at 40% of move distance.
@@ -3054,7 +3114,8 @@ const RefinedStrategy = (() => {
         signal: false,
         reason: "INSUFFICIENT_DATA",
         direction,
-        quality: null
+        quality: null,
+        gates: { trigger: false, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
       };
     }
 
@@ -3077,7 +3138,9 @@ const RefinedStrategy = (() => {
         signal: false,
         reason: "INSUFFICIENT_DATA",
         direction,
-        quality: null
+        quality: null,
+        trend,
+        gates: { trigger: false, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
       };
     }
 
@@ -3097,8 +3160,9 @@ const RefinedStrategy = (() => {
         signal: false,
         reason: isBuy ? "NO_UPSIDE_BREAKOUT" : "NO_DOWNSIDE_BREAKOUT",
         direction,
+        trend,
         quality: null,
-        gates: { sweep: false, structure: false, orderBlock: false, fvg: false, retracement: false }
+        gates: { trigger: false, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
       };
     }
 
@@ -3109,14 +3173,20 @@ const RefinedStrategy = (() => {
     // range. EXPANSION/TREND/RANGE all still pass. ──
     const regime = (typeof detectMarketRegime === "function") ? detectMarketRegime() : "UNKNOWN";
     if (C.simple.avoidDeadRegime && regime === "DEAD") {
-      return { signal: false, reason: "DEAD_MARKET_REGIME", direction, quality: null };
+      return {
+        signal: false, reason: "DEAD_MARKET_REGIME", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
     }
 
     // ── News blackout — skip only the actual high-impact release window
     // itself (±5min), where spreads spike and wicks are unreliable. Doesn't
     // touch the AWARE/POST_RELEASE windows the bot already sizes down for. ──
     if (C.simple.avoidNewsRelease && typeof newsEngine !== "undefined" && newsEngine.state === "PRE_RELEASE") {
-      return { signal: false, reason: "NEWS_RELEASE_WINDOW", direction, quality: null };
+      return {
+        signal: false, reason: "NEWS_RELEASE_WINDOW", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: true, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
     }
 
     // ── Room-to-run — reject breakouts firing right into a nearby opposing
@@ -3140,7 +3210,10 @@ const RefinedStrategy = (() => {
       }
     }
     if (C.simple.minRoomATR > 0 && roomATR < C.simple.minRoomATR) {
-      return { signal: false, reason: "NO_ROOM_TO_RUN", direction, quality: null };
+      return {
+        signal: false, reason: "NO_ROOM_TO_RUN", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: true, newsOk: true, roomOk: false, wickOk: false, quality: false }
+      };
     }
 
     // ── Dynamic quality score (0-100) — replaces the old flat 70. Feeds
@@ -3192,7 +3265,8 @@ const RefinedStrategy = (() => {
         reason: "OPPOSING_WICK_REJECTION",
         direction,
         trend,
-        quality: { total: 0, approved: false }
+        quality: { total: 0, approved: false },
+        gates: { trigger: true, regimeOk: true, newsOk: true, roomOk: true, wickOk: false, quality: false }
       };
     }
 
@@ -3222,7 +3296,8 @@ const RefinedStrategy = (() => {
         reason: counterTrend ? "AGAINST_TREND_LOW_GRADE" : "QUALITY_BELOW_THRESHOLD",
         direction,
         trend,
-        quality: { total: scoreTotal, approved: false }
+        quality: { total: scoreTotal, approved: false },
+        gates: { trigger: true, regimeOk: true, newsOk: true, roomOk: true, wickOk: true, quality: false }
       };
     }
 
@@ -3270,7 +3345,7 @@ const RefinedStrategy = (() => {
       sweep, bms, ob, fvg: null, zone, quality,
       setupAgeMinutes: 0,
       expired: false,
-      gates: { sweep: true, structure: true, orderBlock: true, fvg: false, retracement: true, quality: true },
+      gates: { trigger: true, regimeOk: true, newsOk: true, roomOk: true, wickOk: true, quality: true },
       entryModel: {
         type: "SIMPLE_MOMENTUM_BREAKOUT",
         zoneMin: zone.min,
@@ -3282,6 +3357,81 @@ const RefinedStrategy = (() => {
       // actually applied. Fixed as part of this simplification.
       _m1: completed
     };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // LIVE STRENGTH GAUGE — read-only, does not gate or affect trading.
+  // Mirrors evaluate()'s exact scoring formula (breakout/trend/regime/room
+  // minus wick penalty) but does NOT require the hard trigger/regime/news/
+  // room/wick gates to have passed — it reports "what score this setup
+  // would currently get", so the UI gauge can move continuously between
+  // breakouts instead of sitting at zero until one fires. Purely a display
+  // helper; evaluate() above remains the sole source of truth for entries.
+  // ─────────────────────────────────────────────────────────────────────
+  function computeSetupStrength(direction, candleSets) {
+    const isBuy = direction === "BUY";
+    const m1 = normalizeCandles(candleSets && candleSets[60] ? candleSets[60] : []);
+    const m5 = normalizeCandles(candleSets && candleSets[300] ? candleSets[300] : []);
+
+    const need = C.simple.lookbackBars + 2;
+    if (m1.length < need) return { score: 0, trend: "NONE", counterTrend: false, ready: false };
+
+    const trend = (C.simple.useTrendFilter && m5.length >= 55) ? getTrendBias(m5) : "NONE";
+
+    const completed = m1.slice(0, -1);
+    const last = completed[completed.length - 1];
+    const priorWindow = completed.slice(-1 - C.simple.lookbackBars, -1);
+    if (!last || priorWindow.length < C.simple.lookbackBars) {
+      return { score: 0, trend, counterTrend: false, ready: false };
+    }
+
+    const recentHigh = highest(priorWindow, 0, priorWindow.length - 1);
+    const recentLow  = lowest(priorWindow, 0, priorWindow.length - 1);
+    const barRange   = range(last);
+    const bodyRatio  = barRange > 0 ? Math.abs(last.close - last.open) / barRange : 0;
+    const currentATR = atr(completed, 14) || barRange;
+
+    const regime = (typeof detectMarketRegime === "function") ? detectMarketRegime() : "UNKNOWN";
+
+    // Overshoot allowed to go negative here (price hasn't cleared the range
+    // yet) and is simply clamped to 0 for scoring — lets the breakout
+    // component build smoothly toward the trigger instead of snapping in.
+    const overshoot = isBuy ? (last.close - recentHigh) : (recentLow - last.close);
+    const overshootATR = currentATR > 0 ? overshoot / currentATR : 0;
+    const breakoutScore = clamp(bodyRatio, 0, 1) * 30 + clamp(overshootATR, 0, 1) * 15;
+
+    const aligned = (isBuy && trend === "BULL") || (!isBuy && trend === "BEAR");
+    const counterTrend = trend !== "NONE" && !aligned;
+    const trendScore = trend === "NONE" ? 12 : (aligned ? 25 : 0);
+
+    const regimeScore = (regime === "EXPANSION" || regime === "TREND") ? 15
+                       : regime === "RANGE" ? 5 : 0;
+
+    const roomWindow = completed.slice(-1 - C.simple.roomLookbackBars, -1);
+    let roomATR = Infinity;
+    if (roomWindow.length >= 5) {
+      if (isBuy) {
+        const resistance = highest(roomWindow, 0, roomWindow.length - 1);
+        if (Number.isFinite(resistance) && resistance > last.close) {
+          roomATR = currentATR > 0 ? (resistance - last.close) / currentATR : Infinity;
+        }
+      } else {
+        const support = lowest(roomWindow, 0, roomWindow.length - 1);
+        if (Number.isFinite(support) && support < last.close) {
+          roomATR = currentATR > 0 ? (last.close - support) / currentATR : Infinity;
+        }
+      }
+    }
+    const roomScore = Number.isFinite(roomATR) ? clamp(roomATR / 3, 0, 1) * 15 : 15;
+
+    const oppWick = isBuy
+      ? last.high - Math.max(last.open, last.close)
+      : Math.min(last.open, last.close) - last.low;
+    const oppWickRatio = barRange > 0 ? clamp(oppWick / barRange, 0, 1) : 0;
+    const wickPenalty = clamp(oppWickRatio - 0.15, 0, 0.55) * 20;
+
+    const score = clamp(breakoutScore + trendScore + regimeScore + roomScore - wickPenalty, 0, 100);
+    return { score, trend, counterTrend, regime, ready: true };
   }
 
 
@@ -3752,6 +3902,13 @@ const RefinedStrategy = (() => {
         buy: evaluate("BUY", price, candleSets),
         sell: evaluate("SELL", price, candleSets)
       };
+    },
+
+    // Read-only live strength (0-100) for the UI gauge — see
+    // computeSetupStrength() above for why this doesn't require a fired
+    // trigger the way evaluate() does.
+    strength(direction, candleSets) {
+      return computeSetupStrength(direction, candleSets);
     },
 
     calculateTradeGeometry(direction, entryPrice, setup) {
@@ -4533,28 +4690,37 @@ const strategy = {
     const r = RefinedStrategy['evaluate' + (direction === 'BUY' ? 'Buy' : 'Sell')](
       price, { 60: candles[60], 300: candles[300] }
     );
-    const gDefault = { sweep:false, structure:false, orderBlock:false, fvg:false, retracement:false, quality:false };
+    const gDefault = { trigger:false, regimeOk:false, newsOk:false, roomOk:false, wickOk:false, quality:false };
     const g = Object.assign({}, gDefault, r.gates || {});
     const score = Object.values(g).filter(Boolean).length;
     const isBuy = direction === 'BUY';
 
+    // Live strength (0-100) — same weighted formula evaluate() uses, but
+    // available continuously (doesn't require a trigger to have fired).
+    // Falls back to it only when evaluate() itself hasn't produced a real
+    // quality score yet (i.e. no breakout candle to score).
+    const liveStrength = RefinedStrategy.strength(direction, { 60: candles[60], 300: candles[300] });
+    const strengthScore = (r.quality && typeof r.quality.total === 'number')
+      ? r.quality.total
+      : (liveStrength ? liveStrength.score : 0);
+
     const conds = isBuy ? {
-      bSess:  true,
+      bSess:  r.trend === 'BULL',
       bKZ:    this.inKillZone(),
-      bSweep: g.sweep,
-      bBMS:   g.structure,
-      bOB:    g.orderBlock,
-      bFVG:   g.fvg,
-      bZone:  g.retracement,
+      bSweep: g.trigger,
+      bBMS:   g.regimeOk,
+      bOB:    g.newsOk,
+      bFVG:   g.roomOk,
+      bZone:  g.wickOk,
       bEntry: !!r.signal,
     } : {
-      sSess:  true,
+      sSess:  r.trend === 'BEAR',
       sKZ:    this.inKillZone(),
-      sSweep: g.sweep,
-      sBMS:   g.structure,
-      sOB:    g.orderBlock,
-      sFVG:   g.fvg,
-      sZone:  g.retracement,
+      sSweep: g.trigger,
+      sBMS:   g.regimeOk,
+      sOB:    g.newsOk,
+      sFVG:   g.roomOk,
+      sZone:  g.wickOk,
       sEntry: !!r.signal,
     };
 
@@ -4580,6 +4746,9 @@ const strategy = {
       // RefinedStrategy.calculateTradeGeometry()/calculatePositionSize()
       // instead of re-deriving SL/TP/size from scratch.
       qualityScore: r.quality ? r.quality.total : null,
+      // Continuous 0-100 strength for the gauge — see liveStrength above.
+      strength: strengthScore,
+      counterTrend: r.counterTrend || (liveStrength ? liveStrength.counterTrend : false),
       raw: r,
     };
   },
@@ -4757,7 +4926,10 @@ function drawChart(overridePositions = null, overrideMid = null) {
   }
   // ── GATE PROGRESS OVERLAY — shows which gates have fired for live setup ──
   // Renders a compact vertical pill in the top-left corner of the chart.
-  // Gates: G1=Sweep G2=BMS(structure) G3=OB G4=FVG(bonus) G5=Zone G6=Quality-approved
+  // Gates: G1=Momentum Trigger G2=Regime G3=News G4=Room G5=Wick G6=Quality-approved
+  // (matches the live RefinedStrategy.evaluate() checks exactly — no ICT/SMC
+  // concepts here; those only exist in the separate cosmetic chart-zone
+  // drawing below, which does not feed this overlay or the settings gauge.)
   // Color: green = passed, dark = pending, gold outline = signal firing
   (function drawGateOverlay() {
     const bs = strategy.evalBuy(mid);
@@ -4774,7 +4946,7 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const count  = Math.max(bCount, sCount);
     if (count === 0) return;
 
-    const labels = ['S1\nSWEEP','S2\nBMS','S3\nOB','S4\nFVG','S5\nZONE','S6\nQUAL'];
+    const labels = ['G1\nTRIG','G2\nREG','G3\nNEWS','G4\nROOM','G5\nWICK','G6\nQUAL'];
     const baseX = PAD.l + 8;
     const baseY = PAD.t + 10;
     const pillW = 28, pillH = 22, gap = 4;
@@ -5275,6 +5447,47 @@ function updateConditionals(buyConds, sellConds) {
   });
 }
 
+// ── STRENGTH GAUGE ──
+// buyStrength/sellStrength are 0-100 (see strategy._eval's `strength`,
+// backed by RefinedStrategy.strength()/computeSetupStrength()). The
+// gauge shows whichever side is currently stronger — green for BUY,
+// red for SELL — and only "lights up" fully once that side has cleared
+// the real B+ entry floor (C.quality.plusScore), so a lit gauge roughly
+// tracks "the bot would actually take this trade right now."
+function updateStrengthGauge(buyStrength, sellStrength) {
+  const wrap = $('strengthGauge'), num = $('strengthGaugeNum'),
+        lbl = $('strengthGaugeLabel'), sub = $('strengthGaugeSub'),
+        fill = $('strengthGaugeFill');
+  if (!wrap || !num || !lbl || !sub || !fill) return;
+
+  const b = Number.isFinite(buyStrength)  ? buyStrength  : 0;
+  const s = Number.isFinite(sellStrength) ? sellStrength : 0;
+  const isBuyLeading = b >= s;
+  const value = Math.round(isBuyLeading ? b : s);
+
+  const cfg = (typeof RefinedStrategy !== 'undefined') ? RefinedStrategy.config.quality : null;
+  const minFloor = cfg ? cfg.minimumScore : 53;
+  const fireFloor = cfg ? cfg.plusScore   : 78;
+
+  num.textContent = value;
+  fill.style.width = value + '%';
+  wrap.classList.remove('gauge-neutral','gauge-lean-buy','gauge-lean-sell','gauge-buy','gauge-sell');
+
+  if (value < minFloor) {
+    wrap.classList.add('gauge-neutral');
+    lbl.textContent = 'FORMING';
+    sub.textContent = 'Waiting on setup — no bias yet';
+  } else if (value < fireFloor) {
+    wrap.classList.add(isBuyLeading ? 'gauge-lean-buy' : 'gauge-lean-sell');
+    lbl.textContent = isBuyLeading ? 'LEANING BUY' : 'LEANING SELL';
+    sub.textContent = `Building — needs ${fireFloor}+ to fire`;
+  } else {
+    wrap.classList.add(isBuyLeading ? 'gauge-buy' : 'gauge-sell');
+    lbl.textContent = isBuyLeading ? 'BUY' : 'SELL';
+    sub.textContent = `Grade floor cleared (≥${fireFloor}) — signal-strength trade`;
+  }
+}
+
 function addSignal(type, text, price) {
   const scroll = $('feedScroll');
   const now = new Date(), t = now.toUTCString().slice(17,25);
@@ -5483,16 +5696,7 @@ function updateSafetyUI() {
       : 'sb-val';
   }
   if(badge) {
-    if(survivalSessionLocked) {
-      badge.textContent = '🔴 SESSION LOCK';
-      badge.className = 'sb-badge locked';
-      if(dot) dot.className = 'sb-dot d';
-    } else if(survivalPauseUntil > 0 && Date.now() < survivalPauseUntil) {
-      const minLeft = Math.ceil((survivalPauseUntil - Date.now()) / 60000);
-      badge.textContent = `⏸ PAUSED ${minLeft}m`;
-      badge.className = 'sb-badge locked';
-      if(dot) dot.className = 'sb-dot d';
-    } else if(tradingLocked) {
+    if(tradingLocked) {
       badge.textContent = '🔴 LOCKED';
       badge.className = 'sb-badge locked';
       if(dot) dot.className = 'sb-dot d';
@@ -5509,18 +5713,6 @@ function updateSafetyUI() {
                         : pct <= SAFETY.EMERG_FLOOR_PCT * 2 ? 'sb-dot w' : 'sb-dot';
         } else { dot.className = 'sb-dot'; }
       }
-    }
-  }
-  // Post-TP evaluation badge
-  const ptpBadge = $('sbPostTP');
-  if(ptpBadge) {
-    if(postTPState && Date.now() < postTPState.evalEndTime) {
-      const msLeft  = postTPState.evalEndTime - Date.now();
-      const minLeft = Math.ceil(msLeft / 60000);
-      ptpBadge.textContent = minLeft > 1 ? `POST-TP ${minLeft}m` : `POST-TP <1m`;
-      ptpBadge.style.display = 'inline-block';
-    } else {
-      ptpBadge.style.display = 'none';
     }
   }
 }
@@ -6244,20 +6436,9 @@ function checkDemoPositions() {
     addSignal(pnl>0?'buy':'sell',`${dirLbl} CLOSED [${reason}] PnL: ${pnl>=0?'+':''}$${pnl.toFixed(2)} @ ${mid.toFixed(2)}`, mid);
     updateLastTrade({id:pos.id,dir:dirLbl,entry:pos.entry,status:reason,pnl});
 
-    // ── POST-TP CONTINUATION EVALUATION STATE ──
-    if(reason === 'TP') {
-      postTPState = {
-        dir: pos.dir,
-        time: Date.now(),
-        evalEndTime: Date.now() + 15 * 60 * 1000, // 15-minute cooldown after TP (SurvivalEngine spec)
-        approved: false,
-        tp: pos.tpPrice,
-        entry: pos.entry,
-      };
-      addSignal('info', `POST-TP EVAL — 15-min cooldown before next entry`, null);
-    } else {
-      postTPState = null;
-    }
+    // (Post-TP 15-min evaluation pause removed on request — no cooldown,
+    // pause, or wait of any kind after TP, SL, or any other close. The bot
+    // goes straight into evaluating the next signal below.)
 
     // Session performance tracking
     const sess = strategy.activeSession();
@@ -6984,27 +7165,23 @@ function runStrategy() {
   // ── CONCURRENT POSITION CAP ──
   if (demoPositions.length >= CFG.MAX_CONCURRENT_POS) return;
 
-  // ── POST-TP: clear when window expires or a fresh signal fires ──
-  if (postTPState && now >= postTPState.evalEndTime) {
-    postTPState = null;
-  }
-
   // ── EVALUATE SIGNALS ──
   // Strategy chain: M5 Sweep → M1 Displacement → True BMS → OB → FVG → 20-50% Zone
   const bs = strategy.evalBuy(mid);
   const ss = strategy.evalSell(mid);
   updateConditionals(bs.conds, ss.conds);
+  updateStrengthGauge(bs.strength, ss.strength);
 
   // ── PROGRESS LOG (every 5 s when chain is partially forming) ──
   if (now % 5000 < 1000) {
     if (!bs.signal && bs.score > 0) {
-      const steps = ['SWEEP','BMS','OB','FVG','ZONE','QUALITY'];
+      const steps = ['TRIGGER','REGIME','NEWS','ROOM','WICK','QUALITY'];
       const pending = steps.filter((_, i) => ![bs.conds.bSweep, bs.conds.bBMS,
         bs.conds.bOB, bs.conds.bFVG, bs.conds.bZone, bs.conds.bEntry][i]);
       addSignal('info', `BUY chain ${bs.score}/6 — waiting: ${pending.join('→')}`, mid);
     }
     if (!ss.signal && ss.score > 0) {
-      const steps = ['SWEEP','BMS','OB','FVG','ZONE','QUALITY'];
+      const steps = ['TRIGGER','REGIME','NEWS','ROOM','WICK','QUALITY'];
       const pending = steps.filter((_, i) => ![ss.conds.sSweep, ss.conds.sBMS,
         ss.conds.sOB, ss.conds.sFVG, ss.conds.sZone, ss.conds.sEntry][i]);
       addSignal('info', `SELL chain ${ss.score}/6 — waiting: ${pending.join('→')}`, mid);
@@ -7030,13 +7207,12 @@ function runStrategy() {
     lastTradedBullSweepIdx   = bs.sweepIdx;
     lastTradedBullSweepEpoch = now;
     lastTradedBullSweepPrice = bs.sweepLow || 0;
-    postTPState = null;
     const sess  = strategy.activeSession() || 'SESSION';
     const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
     const grade = bs.legacyGrade >= 3 ? '★★★' : bs.legacyGrade === 2 ? '★★' : '★';
     const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
     addSignal('buy',
-      `[${sess}]${kzTag} BUY ${grade}${nTag} — M5-Sweep→M1-BMS→OB→FVG→Zone ✓ SL@sweep-low`, mid);
+      `[${sess}]${kzTag} BUY ${grade}${nTag} — Momentum Breakout · Quality ${bs.qualityScore != null ? Math.round(bs.qualityScore) : '—'} (${bs.raw && bs.raw.quality ? bs.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
     // SL placed at M5 sweep candle low (new strategy spec)
     placeDemoTrade('UP', bs.slRef || bs.ob, bs.legacyGrade, bs.raw, bs.qualityScore);
 
@@ -7046,13 +7222,12 @@ function runStrategy() {
     lastTradedBearSweepIdx   = ss.sweepIdx;
     lastTradedBearSweepEpoch = now;
     lastTradedBearSweepPrice = ss.sweepHigh || 0;
-    postTPState = null;
     const sess  = strategy.activeSession() || 'SESSION';
     const kzTag = strategy.activeKillZone() ? ` [${strategy.activeKillZone()}]` : '';
     const grade = ss.legacyGrade >= 3 ? '★★★' : ss.legacyGrade === 2 ? '★★' : '★';
     const nTag  = newsEngine.state !== 'NORMAL' ? ` [NEWS:${newsEngine.state}]` : '';
     addSignal('sell',
-      `[${sess}]${kzTag} SELL ${grade}${nTag} — M5-Sweep→M1-BMS→OB→FVG→Zone ✓ SL@sweep-high`, mid);
+      `[${sess}]${kzTag} SELL ${grade}${nTag} — Momentum Breakout · Quality ${ss.qualityScore != null ? Math.round(ss.qualityScore) : '—'} (${ss.raw && ss.raw.quality ? ss.raw.quality.grade : '?'}) ✓ SL@structure`, mid);
     // SL placed at M5 sweep candle high (new strategy spec)
     placeDemoTrade('DOWN', ss.slRef || ss.ob, ss.legacyGrade, ss.raw, ss.qualityScore);
   }
@@ -7088,17 +7263,14 @@ function startBot() {
   if(demoBalance <= 0) { showToast(); return; }
   botOn = true;
   sessionPnL = 0; tradingLocked = false; consecutiveLosses = 0; consecutiveWins = 0; riskHalved = false;
-  // ── SURVIVAL ENGINE: Reset streak-based locks on manual start ──
-  survivalPauseUntil = 0; survivalSessionLocked = false;
   lastTradedBullSweepIdx = -1; lastTradedBearSweepIdx = -1;
   lastTradedBullSweepEpoch = 0; lastTradedBearSweepEpoch = 0;
   lastTradedBullSweepPrice = 0; lastTradedBearSweepPrice = 0;
-  postTPState = null; // Clear any lingering post-TP state
   if(!authed && demoBalance > 0 && hardFloor === 0) resetHardFloor(demoBalance);
   if(!authed) demoStartBal = demoBalance;
   if(authed && !startBalance && balance) { startBalance=balance; CFG.START_BALANCE=balance; }
   syncBotButtons();
-  addSignal('info','Bot STARTED — Scanning for ICT/SMC Sniper setups: SWEEP→DISP→MSS→OB/FVG→20-50%→CONF',null);
+  addSignal('info','Bot STARTED — Scanning for momentum breakout setups: TRIGGER→REGIME/NEWS/ROOM/WICK→QUALITY SCORE→SIGNAL',null);
 }
 function stopBot() {
   botOn=false;
@@ -9202,7 +9374,7 @@ setInterval(() => {
 
 addSignal('info','BTCUSD PA Bot v2 — Binance API data engine ready',null);
 
-addSignal('info','Strategy: Elite ICT/SMC Delivery Engine — M5 Liquidity Sweep → M1 True BMS → M1 Displacement → M1 OB → M1 FVG (optional) → 10-70% Mean Threshold | SL=Sweep Candle | Loosened Filters v2',null);
+addSignal('info','Strategy: Momentum Breakout + Quality Score Engine — M1 candle breaks N-bar range with strong body → regime/news/room/wick checks → 0-100 quality score graded B+/A/A+ | SL=structural HYBRID reference',null);
 </script>
 </body>
 </html>
