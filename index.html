@@ -8268,11 +8268,26 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   // alone would add ~2.6 minutes on top of actual request time even if the
   // cap were removed.
   //
-  // Fix: each page's [start,end) window is fully determined by granularity
-  // up front (Binance klines pages don't depend on each other's results to
-  // know where the next one starts), so all pages can be fetched from a
-  // small concurrent pool instead of one strictly after another. A year of
-  // M1 data now completes in well under 2 minutes.
+  // SPEED FIX (2nd pass) — the previous concurrent version capped itself at
+  // 8 in-flight requests "comfortably under Binance's public rate limit",
+  // but that estimate was way too conservative: /api/v3/klines is a flat
+  // weight of 2 regardless of page size, against a 6000/min IP budget — so
+  // even fetching the full ~526-page year in one burst only spends ~1052 of
+  // that 6000, nowhere near enough to need throttling down to 8-wide. The
+  // real ceiling at 8-wide was just wall-clock: 526 pages / 8 ≈ 66 sequential
+  // rounds of network round-trip time, which is what pushed a 1-year fetch
+  // toward the 1-2 minute mark. Fixed two ways:
+  //   1. Concurrency raised to 24 (still far under the weight budget even
+  //      counting retries), cutting the same 526 pages to ~22 rounds.
+  //   2. Pages are round-robined across BOTH Binance hosts (binance.com /
+  //      binance.us) instead of all hitting one — separate infra, separate
+  //      rate-limit bucket, and it sidesteps any single-origin connection
+  //      ceiling the browser/CDN might otherwise impose on 24 parallel
+  //      requests to the same host. Independent of the live-feed WS
+  //      failover host index, so a backtest fetch never interferes with (or
+  //      is limited by) whichever host the live ticker happens to be on.
+  // Net effect: a full year of M1 data (~526 pages) now completes in well
+  // under a minute on a normal connection, instead of 1-2 minutes.
   const intervalMap = { 60: '1m', 300: '5m', 900: '15m' };
   const interval = intervalMap[granularity] || '1m';
   const PAGE_BARS = 1000;
@@ -8286,25 +8301,36 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   const MAX_PAGES = 2000; // ~2000 × 1000 M1 bars ≈ 3.8yrs — plenty of headroom for a 1yr backtest
   if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
 
-  const CONCURRENCY = 8; // parallel in-flight requests — comfortably under Binance's public rate limit
+  const CONCURRENCY = 24; // parallel in-flight requests, split across both hosts below
   const results = new Array(pageStarts.length);
   let completedPages = 0;
   btFetching = true;
 
   // Fetch one page. Uses fetch() with a manual timeout so a stalled request
-  // doesn't hang the pool indefinitely.
-  const fetchPage = (pageStartMs) => new Promise((resolve, reject) => {
+  // doesn't hang the pool indefinitely. hostIdx round-robins across
+  // BINANCE_HOSTS so the 24-wide pool isn't all hammering one origin.
+  const fetchPage = (pageStartMs, hostIdx) => new Promise((resolve, reject) => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       controller.abort();
-      reject(new Error('Binance request timed out after 20s'));
-    }, 20000);
+      reject(new Error('Binance request timed out after 15s'));
+    }, 15000);
     const pageEndMs = Math.min(pageStartMs + pageSpanMs - 1, endMs);
-    const url = `${_binanceRestBase()}?symbol=${BINANCE_SYMBOL}&interval=${interval}&startTime=${pageStartMs}&endTime=${pageEndMs}&limit=${PAGE_BARS}`;
+    const restBase = BINANCE_HOSTS[hostIdx % BINANCE_HOSTS.length].restBase;
+    const url = `${restBase}?symbol=${BINANCE_SYMBOL}&interval=${interval}&startTime=${pageStartMs}&endTime=${pageEndMs}&limit=${PAGE_BARS}`;
     fetch(url, { signal: controller.signal })
       .then(res => {
         clearTimeout(timer);
-        if (!res.ok) { reject(new Error(`HTTP ${res.status}`)); return; }
+        if (!res.ok) {
+          // Surface Retry-After (present on a real 429) so the retry loop
+          // can back off exactly as long as Binance actually asked for,
+          // instead of guessing with a fixed exponential delay.
+          const retryAfter = res.status === 429 ? parseFloat(res.headers.get('Retry-After')) : null;
+          const err = new Error(`HTTP ${res.status}`);
+          err.retryAfterMs = retryAfter && !isNaN(retryAfter) ? retryAfter * 1000 : null;
+          reject(err);
+          return;
+        }
         return res.json();
       })
       .then(data => {
@@ -8316,30 +8342,31 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
       .catch(e => { clearTimeout(timer); reject(e); });
   });
 
-  // Retry a single page up to 3 times with exponential back-off so a
-  // transient Binance rate-limit or connection drop doesn't abort the whole
-  // fetch — but doesn't block any other in-flight page while it retries.
-  const fetchWithRetry = async (pageStartMs, pageIdx) => {
+  // Retry a single page up to 3 times so a transient connection drop or rate
+  // limit doesn't abort the whole fetch — but doesn't block any other
+  // in-flight page while it retries. A 429 honors Binance's own Retry-After
+  // header; any other error falls back to a short exponential back-off.
+  const fetchWithRetry = async (pageStartMs, pageIdx, hostIdx) => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       if (btCancelled) return [];
       try {
-        return await fetchPage(pageStartMs);
+        return await fetchPage(pageStartMs, hostIdx);
       } catch (e) {
         if (attempt === 3) {
           addSignal('warn', `BT fetch error (page ${pageIdx + 1}/${pageStarts.length}): ${e.message}`, null);
           return [];
         }
-        await new Promise(r => setTimeout(r, 400 * attempt));
+        await new Promise(r => setTimeout(r, e.retryAfterMs || 400 * attempt));
       }
     }
     return [];
   };
 
   let nextPage = 0;
-  async function worker() {
+  async function worker(workerIdx) {
     while (nextPage < pageStarts.length && !btCancelled) {
       const pageIdx = nextPage++;
-      results[pageIdx] = await fetchWithRetry(pageStarts[pageIdx], pageIdx);
+      results[pageIdx] = await fetchWithRetry(pageStarts[pageIdx], pageIdx, workerIdx);
       completedPages++;
       if (onProgress) onProgress(completedPages, pageStarts.length);
     }
@@ -8347,7 +8374,7 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
 
   try {
     const poolSize = Math.min(CONCURRENCY, pageStarts.length) || 1;
-    await Promise.all(Array.from({ length: poolSize }, worker));
+    await Promise.all(Array.from({ length: poolSize }, (_, i) => worker(i)));
   } finally {
     btFetching = false;
   }
