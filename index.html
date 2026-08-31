@@ -5802,6 +5802,13 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
   const pos = {
     id: ++demoPosId, dir, entry: entryPrice, lots: adjLots, posUnits, margin,
     slPrice, tpPrice, slAmount, tpAmount, quality, qualityScore,
+    // BUG FIX: slAmount gets zeroed out the moment the trade reaches BE/trail
+    // (it's used as a live "already risk-free" marker elsewhere), so it can't
+    // double as the trade's original $ risk once the position closes. riskAmount
+    // is a frozen copy taken at open and never mutated again — it's the only
+    // correct denominator for an R-multiple, and BE/trail/partial trades still
+    // report positive slAmount to the risk-audit UI as before.
+    riskAmount: slAmount,
     qMult: riskCheck.qMult,  // stored for the portfolio-heat guard on future concurrent trades
     beTriggered: false, trailActive: false, trailPhase: 0, trailHighWater: entryPrice, openTime: Date.now(),
     partialTaken: false,  // Survival Engine: partial TP at 70% progress (closes 50%, SL → BE)
@@ -6127,8 +6134,13 @@ function checkDemoPositions() {
     });
     if (!liveEquity.length) liveEquity = [demoStartBal || demoBalance];
     liveEquity.push(+demoBalance.toFixed(2));
-    liveMaxBal = Math.max(liveMaxBal || demoBalance, demoBalance);
-    if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - demoBalance) / liveMaxBal) * 100);
+    // BUG FIX: same vault-vs-drawdown issue as the backtest replay engine —
+    // demoBalance alone drops every time checkProfitLock() sweeps a chunk
+    // into lockedProfit, which made every vault lock look like a losing
+    // drawdown. Measure peak/DD against total equity (balance + vault).
+    { const _eq = demoBalance + (lockedProfit || 0);
+      liveMaxBal = Math.max(liveMaxBal || _eq, _eq);
+      if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - _eq) / liveMaxBal) * 100); }
 
     updateStatsStrip();
   });
@@ -6220,8 +6232,12 @@ function checkDemoPositions() {
     // Track live equity curve for history panel
     if (!liveEquity.length) liveEquity = [demoStartBal || demoBalance];
     liveEquity.push(+demoBalance.toFixed(2));
-    liveMaxBal = Math.max(liveMaxBal || demoBalance, demoBalance);
-    if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - demoBalance) / liveMaxBal) * 100);
+    // BUG FIX: measure peak/DD against total equity (balance + vault) — see
+    // note at the partial-close site above for why demoBalance alone
+    // misreports every profit-lock sweep as a drawdown.
+    { const _eq = demoBalance + (lockedProfit || 0);
+      liveMaxBal = Math.max(liveMaxBal || _eq, _eq);
+      if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - _eq) / liveMaxBal) * 100); }
     const dirLbl = pos.dir==='UP'?'BUY':'SELL';
     // With epoch+price dedup, no need to reset indices on close.
     // Cooldown period (20 min) naturally prevents re-entry on same level.
@@ -7628,8 +7644,17 @@ const replay = {
         // trade so every downstream stat reconciles with replayBal. ──
         this.replayWins++; this.replayConsecWin++; this.replayConsecLoss = 0;
         if (this.replayRiskHalved) this.replayRiskHalved = false;
-        this.replayMaxBal = Math.max(this.replayMaxBal, this.replayBal);
-        const ddPartial = ((this.replayMaxBal - this.replayBal) / this.replayMaxBal) * 100;
+        // BUG FIX: drawdown must be measured against total equity (trading
+        // balance + vault), not replayBal alone. The profit-lock sweep moves
+        // money out of replayBal into replayVault every time the daily target
+        // is hit — that's a deliberate transfer, not a losing trade — but
+        // computing peak/DD off replayBal only made every single lock event
+        // look like a balance crash, since replayMaxBal had already ratcheted
+        // up to the pre-sweep peak. That inflated Max Drawdown into the
+        // 50-99% range purely from money being safely banked, not lost.
+        const _equityP = this.replayBal + (this.replayVault || 0);
+        this.replayMaxBal = Math.max(this.replayMaxBal, _equityP);
+        const ddPartial = ((this.replayMaxBal - _equityP) / this.replayMaxBal) * 100;
         this.replayMaxDD = Math.max(this.replayMaxDD, ddPartial);
 
         this.trades.push({
@@ -7645,7 +7670,7 @@ const replay = {
           slDist: +(pos.slDist || Math.abs(pos.entry - pos.slPrice)).toFixed(2),
           rr: CFG.RR, quality: pos.quality,
           lots: pos.lots,
-          slAmount: 0, tpAmount: +(pos.tpAmount || 0).toFixed(2),
+          slAmount: 0, riskAmount: pos.riskAmount || 0, tpAmount: +(pos.tpAmount || 0).toFixed(2),
           balBefore: +(this.replayBal - partialPnL).toFixed(2),
           balAfter: +this.replayBal.toFixed(2),
           ddAtClose: +this.replayMaxDD.toFixed(2),
@@ -7779,8 +7804,11 @@ const replay = {
       const swapCost = calcSwapCost(pos, (pos.openEpoch || 0) * 1000, candle.epoch * 1000);
       pnl += swapCost;
       this.replayBal = Math.max(0, this.replayBal + (isNaN(pnl) ? 0 : pnl));
-      this.replayMaxBal = Math.max(this.replayMaxBal, this.replayBal);
-      const dd = ((this.replayMaxBal - this.replayBal) / this.replayMaxBal) * 100;
+      // BUG FIX: same vault-vs-drawdown issue as the partial-close branch
+      // above — measure against total equity, not replayBal alone.
+      const _equity = this.replayBal + (this.replayVault || 0);
+      this.replayMaxBal = Math.max(this.replayMaxBal, _equity);
+      const dd = ((this.replayMaxBal - _equity) / this.replayMaxBal) * 100;
       this.replayMaxDD = Math.max(this.replayMaxDD, dd);
       if (pnl > 0) { this.replayWins++; this.replayConsecWin++; this.replayConsecLoss = 0; if(this.replayRiskHalved) this.replayRiskHalved = false; }
       else { this.replayLosses++; this.replayConsecLoss++; this.replayConsecWin = 0; if(this.replayConsecLoss >= SAFETY.CONSEC_LOSS_HALVE) this.replayRiskHalved = true; }
@@ -7804,6 +7832,7 @@ const replay = {
         // ── Sizing ──
         lots: pos.lots,
         slAmount: +(pos.slAmount || 0).toFixed(2),
+        riskAmount: +(pos.riskAmount || 0).toFixed(2),
         tpAmount: +(pos.tpAmount || 0).toFixed(2),
         // ── Account state ──
         balBefore: +(pos.balBefore || 0).toFixed(2),
@@ -7985,10 +8014,15 @@ const replay = {
     let lots = +(slAmount / (slDist * CONTRACT_SIZE)).toFixed(2);
     lots = Math.max(CFG.MIN_LOT_SIZE, Math.min(CFG.MAX_LOT_CAP, lots));
 
+    const _openRisk = slAmount || Math.abs(entryPrice - slPrice) * lots * CONTRACT_SIZE;
     const pos = {
       id: ++this.replayPosIdCounter,
       dir: sig.dir, entry: entryPrice, lots, posUnits: lots * CONTRACT_SIZE,
-      slPrice, tpPrice, slAmount: slAmount || Math.abs(entryPrice - slPrice) * lots * CONTRACT_SIZE, tpAmount,
+      slPrice, tpPrice, slAmount: _openRisk, tpAmount,
+      // BUG FIX: frozen copy of the initial $ risk — see live-open note for
+      // why slAmount alone can't be trusted as the R-multiple denominator
+      // once a trade has moved to BE/trail (it gets zeroed there).
+      riskAmount: _openRisk,
       qMult: riskCheck.qMult,  // stored for the portfolio-heat guard on future concurrent trades
       beTriggered: false, trailActive: false, trailPhase: 0, trailHighWater: entryPrice, openEpoch: epoch, quality: sig.quality,
       qualityScore: sig.qualityScore,
@@ -8558,8 +8592,19 @@ function renderBtResults(r) {
   r.trades.forEach(t => { if (t.pnl < 0) { _curLossStreak++; maxLossStreak = Math.max(maxLossStreak, _curLossStreak); } else _curLossStreak = 0; });
 
   // ── Avg R/Trade (pnl expressed as a multiple of that trade's risk $) ──
-  const rTrades = r.trades.filter(t => t.slAmount > 0);
-  const avgR = rTrades.length ? rTrades.reduce((s,t) => s + (t.pnl / t.slAmount), 0) / rTrades.length : 0;
+  // BUG FIX: this used to divide by t.slAmount, which gets zeroed the moment
+  // a trade reaches BE or starts trailing (it's a live "already risk-free"
+  // marker, not a risk figure). Filtering on slAmount>0 silently threw out
+  // every BE/TRAIL/PARTIAL trade — roughly half the trade log in a typical
+  // run — leaving the average computed only over trades whose stop never
+  // moved (mostly straight SL hits and quick TPs), which is why avgR came
+  // back negative even on runs with a strongly positive total PnL. Use the
+  // frozen riskAmount captured at trade open instead, so every trade with a
+  // real initial risk contributes exactly one R value, regardless of how its
+  // stop was subsequently managed. Falls back to slAmount for any older
+  // cached run that predates the riskAmount field.
+  const rTrades = r.trades.filter(t => (t.riskAmount || t.slAmount) > 0);
+  const avgR = rTrades.length ? rTrades.reduce((s,t) => s + (t.pnl / (t.riskAmount || t.slAmount)), 0) / rTrades.length : 0;
 
   $('btResultGrid').innerHTML = `
     <div class="bt-result-card">
@@ -9063,8 +9108,12 @@ function _scanGapPositions() {
     }
     if (!liveEquity.length) liveEquity = [demoStartBal || demoBalance];
     liveEquity.push(+demoBalance.toFixed(2));
-    liveMaxBal = Math.max(liveMaxBal || demoBalance, demoBalance);
-    if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - demoBalance) / liveMaxBal) * 100);
+    // BUG FIX: measure peak/DD against total equity (balance + vault) — see
+    // note at the partial-close site above for why demoBalance alone
+    // misreports every profit-lock sweep as a drawdown.
+    { const _eq = demoBalance + (lockedProfit || 0);
+      liveMaxBal = Math.max(liveMaxBal || _eq, _eq);
+      if (liveMaxBal > 0) liveMaxDD = Math.max(liveMaxDD, ((liveMaxBal - _eq) / liveMaxBal) * 100); }
     const dirLbl = pos.dir === 'UP' ? 'BUY' : 'SELL';
     addSignal(pnl > 0 ? 'buy' : 'sell',
       `[GAP CLOSE] ${dirLbl} [${reason}] PnL: ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} @ ${atPrice.toFixed(2)} (hit during background)`, mid);
