@@ -7481,6 +7481,8 @@ const replay = {
     // forward as replay advances, so each one now costs O(1) amortized.
     this._m5CompletedCursor  = 0; // index into m5Data:  first bar NOT YET fully completed
     this._m15CompletedCursor = 0; // index into m15Data: first bar NOT YET fully completed
+    this._cachedCompletedM5  = null; // perf cache — see _processCandle
+    this._cachedCompletedM15 = null; // perf cache — see _processCandle
     this._realtimeLastMs  = null; // 1× real-time pacing state — see _tick()
     this._realtimeAccumMs = 0;
     this._m5DisplayCursor    = 0; // index into m5Data:  first bar with epoch > currentEpoch (display/finalize)
@@ -7669,14 +7671,32 @@ const replay = {
 
     // ── A: Completed candle slices (strategy-visible only) ────────────────
     const completedM1  = this.data.slice(Math.max(0, this.index - 499), this.index);
+    const _prevM5Cur = this._m5CompletedCursor;
     while (this._m5CompletedCursor < this.m5Data.length && this.m5Data[this._m5CompletedCursor].epoch + 300 <= currentEpoch) {
       this._m5CompletedCursor++;
     }
-    const completedM5 = this.m5Data.slice(Math.max(0, this._m5CompletedCursor - 200), this._m5CompletedCursor);
+    // PERF: this cursor only moves forward once every ~5 M1 candles, but the
+    // .slice() that builds completedM5 from it is a real O(window) copy
+    // (up to 200 elements) — the old code re-ran that copy on EVERY single
+    // M1 candle regardless of whether the cursor had actually moved, i.e.
+    // ~4 out of every 5 copies were rebuilding an identical array for
+    // nothing. Only re-slice when the cursor changed (or on the very first
+    // candle, when there's no cache yet).
+    if (this._m5CompletedCursor !== _prevM5Cur || !this._cachedCompletedM5) {
+      this._cachedCompletedM5 = this.m5Data.slice(Math.max(0, this._m5CompletedCursor - 200), this._m5CompletedCursor);
+    }
+    const completedM5 = this._cachedCompletedM5;
+    const _prevM15Cur = this._m15CompletedCursor;
     while (this._m15CompletedCursor < this.m15Data.length && this.m15Data[this._m15CompletedCursor].epoch + 900 <= currentEpoch) {
       this._m15CompletedCursor++;
     }
-    const completedM15 = this.m15Data.slice(Math.max(0, this._m15CompletedCursor - 100), this._m15CompletedCursor);
+    // Same idea — M15 cursor only moves every ~15 M1 candles, so this was
+    // re-copying an unchanged ~100-element array on ~14 out of every 15
+    // candles for nothing.
+    if (this._m15CompletedCursor !== _prevM15Cur || !this._cachedCompletedM15) {
+      this._cachedCompletedM15 = this.m15Data.slice(Math.max(0, this._m15CompletedCursor - 100), this._m15CompletedCursor);
+    }
+    const completedM15 = this._cachedCompletedM15;
 
     // ── STEP 1: Position management — uses full bar OHLC (not bias) ───────
     candles[60]  = completedM1;
@@ -7761,6 +7781,21 @@ const replay = {
       let simHigh = current.open;
       let simLow  = current.open;
 
+      // PERF: build the strategy-visible window arrays ONCE per candle and
+      // just overwrite the last (forming-bar) slot on each of the up-to-5
+      // price-path ticks below, instead of `[...completedM1, formingM1]`
+      // (a fresh full 500/200/100-element copy) on every single tick. That
+      // was the single largest remaining backtest cost — up to 5× the copy
+      // work per candle for no reason, since only the last slot ever
+      // changes within a candle. Safe: evalBuy/evalSell/_evaluateEntry only
+      // ever read candles[] synchronously within the same tick — nothing
+      // downstream stashes the array reference for later, so mutating the
+      // shared last slot between ticks doesn't corrupt anything already
+      // processed.
+      const winM1  = completedM1.concat([null]);
+      const winM5  = completedM5.concat([null]);
+      const winM15 = completedM15.concat([null]);
+
       for (let tickIdx = 0; tickIdx < pricePath.length; tickIdx++) {
         const price = pricePath[tickIdx];
         if (this.positions.length) break;
@@ -7797,9 +7832,12 @@ const replay = {
         };
 
         // ── Expose ONLY tick-accurate candle state to the strategy ──
-        candles[60]  = [...completedM1,  formingM1];
-        candles[300] = [...completedM5,  formingM5];
-        candles[900] = [...completedM15, formingM15];
+        winM1[winM1.length - 1]   = formingM1;
+        winM5[winM5.length - 1]   = formingM5;
+        winM15[winM15.length - 1] = formingM15;
+        candles[60]  = winM1;
+        candles[300] = winM5;
+        candles[900] = winM15;
         mid = price;
 
         this._evaluateEntry(currentEpoch, price, pricePath, tickIdx);
