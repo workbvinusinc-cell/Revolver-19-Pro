@@ -1501,6 +1501,48 @@ const RNG = {
   rand() { return (this.seeded && this._next) ? this._next() : Math.random(); },
 };
 
+// ── BACKTEST-DONE SOUND ──
+// Synthesized with the Web Audio API — no external audio file to fetch/host,
+// works offline. Mobile browsers block audio until a real user gesture
+// creates/resumes the AudioContext, so _btAudioUnlock() is called
+// synchronously inside the "Run Backtest" click handler (before any await),
+// and the actual chime plays later, whenever the run finishes.
+let _btAudioCtx = null;
+function _btAudioUnlock() {
+  try {
+    if (!_btAudioCtx) _btAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_btAudioCtx.state === 'suspended') _btAudioCtx.resume();
+  } catch (e) { /* Web Audio unsupported — sound just won't play, run itself is unaffected */ }
+}
+function playBacktestDoneSound() {
+  if (!_btAudioCtx) return;
+  try {
+    const ctx = _btAudioCtx;
+    const t0 = ctx.currentTime;
+    // Single bell-like "ting" — synthesized fresh (not a sampled/ripped
+    // sound file), just a fundamental + two quiet higher overtones with a
+    // fast attack and a smooth decay, which is what gives a bell/message
+    // chime its "ting" character rather than a flat beep.
+    const partials = [
+      { freq: 1567.98, gain: 0.28 }, // fundamental (G6)
+      { freq: 3135.96, gain: 0.10 }, // octave overtone
+      { freq: 4700,     gain: 0.05 }, // quiet upper overtone for "shimmer"
+    ];
+    partials.forEach(({ freq, gain: peak }) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(peak, t0 + 0.008);       // near-instant attack
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);  // long smooth bell-like decay
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.95);
+    });
+  } catch (e) { /* non-fatal — a failed chime should never break the backtest flow */ }
+}
+
 // ── DYNAMIC SPREAD — Exness Raw Spread BTCUSD session profile ──
 // Placeholder session shape calibrated to a tight Raw-Spread-style baseline
 // — replace with real BTCUSD spread data pulled from your live Exness feed
@@ -1867,6 +1909,12 @@ function calculateVolatility(tf = 300) {
   return total / last20.length;
 }
 
+// PERF CACHE: detectMarketRegime()/calculateVolatility() are direction-
+// independent, but evaluate() runs once for BUY and once for SELL on every
+// price tick — so this was recomputing an identical answer twice for every
+// single tick, for zero reason. Cached below; see detectMarketRegime().
+let _regimeCache = { arrRef: null, len: -1, lastClose: null, result: 'UNKNOWN' };
+
 // ── MARKET REGIME DETECTION (ported from Python detect_market_regime) ──
 // Classifies the current M5 market into one of four regimes:
 //   DEAD      — volatility < 1.0 pts (no meaningful movement)
@@ -1878,24 +1926,45 @@ function detectMarketRegime() {
   const arr = candles[300];
   if (!arr || arr.length < 20) return 'UNKNOWN';
 
-  const volatility = calculateVolatility(300);
-  const last = arr[arr.length - 2]; // last completed M5 bar (exclude forming)
-  if (!last) return 'UNKNOWN';
-
-  const body = Math.abs(last.close - last.open);
-
-  if (volatility < 0.5) return 'DEAD';
-  if (body > volatility * 1.5) return 'EXPANSION';
-
-  const recent10 = arr.slice(-11, -1); // last 10 completed bars
-  if (recent10.length >= 5) {
-    const highs = recent10.map(c => c.high);
-    const lows  = recent10.map(c => c.low);
-    const trendStrength = Math.abs(highs[highs.length - 1] - highs[0]);
-    if (trendStrength > volatility * 2) return 'TREND';
+  // PERF: this function's result depends only on candles[300], never on
+  // trade direction — cache it and skip recomputing (including the
+  // calculateVolatility() call inside) when nothing about that data has
+  // actually changed since the last call. Cache key: same array reference,
+  // same length, same forming-bar close — if all three match, the M5 state
+  // is identical to last time, so the answer must be too.
+  const lastC = arr.length ? arr[arr.length - 1].close : null;
+  if (_regimeCache.arrRef === arr && _regimeCache.len === arr.length && _regimeCache.lastClose === lastC) {
+    return _regimeCache.result;
   }
 
-  return 'RANGE';
+  let result;
+  const volatility = calculateVolatility(300);
+  const last = arr[arr.length - 2]; // last completed M5 bar (exclude forming)
+  if (!last) {
+    result = 'UNKNOWN';
+  } else {
+    const body = Math.abs(last.close - last.open);
+    if (volatility < 0.5) {
+      result = 'DEAD';
+    } else if (body > volatility * 1.5) {
+      result = 'EXPANSION';
+    } else {
+      const recent10 = arr.slice(-11, -1); // last 10 completed bars
+      if (recent10.length >= 5) {
+        // (dead-code note: this block previously also computed a `lows`
+        // array here that was never read afterward — dropped; no behavior
+        // change, since it never fed into `result` to begin with.)
+        const highs = recent10.map(c => c.high);
+        const trendStrength = Math.abs(highs[highs.length - 1] - highs[0]);
+        result = (trendStrength > volatility * 2) ? 'TREND' : 'RANGE';
+      } else {
+        result = 'RANGE';
+      }
+    }
+  }
+
+  _regimeCache = { arrRef: arr, len: arr.length, lastClose: lastC, result };
+  return result;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -2326,13 +2395,31 @@ const RefinedStrategy = (() => {
   }
 
   function normalizeCandles(arr) {
-    return Array.isArray(arr) ? arr.filter(c =>
+    if (!Array.isArray(arr)) return [];
+    // PERF: this is called ~10-20× per candle across evaluate()'s call
+    // graph (every evalBuy/evalSell tick, plus again inside sub-checks
+    // like findM5LiquiditySweep), each time copying up to a 500-element
+    // array via .filter() — even though every candle here is either real
+    // fetched history or one we built ourselves, so it's already valid
+    // essentially 100% of the time. Scan first and only allocate a new
+    // (filtered) array in the rare case something's actually invalid —
+    // same result, far less allocation/GC pressure in the common case.
+    let allValid = true;
+    for (let i = 0; i < arr.length; i++) {
+      const c = arr[i];
+      if (!c || !Number.isFinite(c.open) || !Number.isFinite(c.high) || !Number.isFinite(c.low) || !Number.isFinite(c.close)) {
+        allValid = false;
+        break;
+      }
+    }
+    if (allValid) return arr;
+    return arr.filter(c =>
       c &&
       Number.isFinite(c.open) &&
       Number.isFinite(c.high) &&
       Number.isFinite(c.low) &&
       Number.isFinite(c.close)
-    ) : [];
+    );
   }
 
 
@@ -8731,6 +8818,7 @@ function setBtProgress(pct, status) {
 
 async function startBacktest() {
   if (btRunning) return;
+  _btAudioUnlock(); // must happen synchronously inside this click gesture — see comment above playBacktestDoneSound()
   const startBal = parseFloat($('btStartBal').value);
   const profitTarget = parseFloat($('btProfitTarget').value);
   const riskPctInput = parseFloat($('btRiskPct').value);
@@ -8807,6 +8895,7 @@ async function startBacktest() {
       finishBt(false);
     } else if (!replay.active) {
       clearInterval(checkCancel);
+      playBacktestDoneSound(); // only on a genuine finish — not on cancel/error, which call finishBt(false) elsewhere
       finishBt(true);
     }
   }, 500);
