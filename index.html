@@ -700,6 +700,7 @@ input[type=range]::-webkit-slider-thumb{
         <strong>✅ BINANCE FEED ACTIVE</strong>
         Live BTC/USD bid/ask ticks stream free from Binance WebSocket (BTCUSDT).
         No API key required — click Connect to start.
+        <div id="gradeLegendLine" style="margin-top:8px;font-weight:600;letter-spacing:.02em">B+ ≥ — &nbsp;·&nbsp; A ≥ — &nbsp;·&nbsp; A+ ≥ —</div>
       </div>
       <button class="btn btn-auth" id="authBtn" style="margin-top:8px">Connect</button>
 
@@ -1304,7 +1305,7 @@ const CFG = {
   TRAIL_PHASE_1: 60,          // % to TP for BE lock — raised from 50% to avoid premature BE on volatility
   TRAIL_PHASE_2: 80,          // % to TP for 40% trail
   TRAIL_PHASE_3: 93,          // % to TP for 60% runner trail
-  TRAIL_DIST   : 2.0,         // Min trail distance in $ — sized for this bot's tight scalp SLs (0.5–6 pts); also hard-capped at 50% of the move-to-TP in updateThreePhaseTrail() so BE can never lock in more than a TP win pays out
+  TRAIL_DIST   : 2.0,         // Min trail distance in $ for phase 2/3 ratchet floors. No longer used by the BE lock (Phase 1) — that now sets SL to the exact entry price, see updateThreePhaseTrail().
   // ── Blow-Proof Safety Layer Settings (user-configurable) ──
   SAFETY_HARD_FLOOR_PCT   : 10,   // % of start balance = hard floor
   SAFETY_MAX_RISK_CAP_PCT : 5,    // % hard cap on risk per trade
@@ -5480,9 +5481,15 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const pnlColor = inProfit ? '#448aff' : '#ef5350';
     const entryLabel = `${isBuy ? 'BUY' : 'SELL'} ${lotSz}L ${grade}${beLock} · ${pnlSign}$${Math.abs(livePnl).toFixed(2)}`;
     const slLoss = pos.beTriggered ? 0 : (pos.slAmount || Math.abs(pos.entry - pos.slPrice) * (pos.lots || 0.01) * 100 || 0);
+    // BE net: this SL now sits entry ± beDist (see updateThreePhaseTrail),
+    // not exactly at entry, so it's read straight off the real slPrice
+    // instead of a hardcoded "$0.00" that no longer reflects what a hit
+    // here actually pays out.
+    const units = pos.posUnits || (pos.lots || 0.01) * CONTRACT_SIZE || 1;
+    const beNet = (isBuy ? (pos.slPrice - pos.entry) : (pos.entry - pos.slPrice)) * units - (pos.lots || 0) * CFG.COMMISSION_PER_LOT;
     const slLineLabel = pos.trailActive
       ? `TRAIL · SL ${pos.slPrice.toFixed(2)}`
-      : pos.beTriggered ? `BE  ·  $0.00` : `SL  ·  -$${slLoss.toFixed(2)}`;
+      : pos.beTriggered ? `BE  ·  +$${Math.max(0, beNet).toFixed(2)}` : `SL  ·  -$${slLoss.toFixed(2)}`;
     const tpGain = pos.tpAmount || 0;
     const tpLineLabel = `TP  ·  +$${tpGain.toFixed(2)}`;
 
@@ -6365,20 +6372,27 @@ function updateThreePhaseTrail(pos, currentPrice) {
       pos._beLockTicks++;
     }
     if (pos._beLockTicks >= 2) {
-      // BE lock distance: proportional to total move (min 15%, floored by
-      // TRAIL_DIST) but ALWAYS capped at 50% of the move-to-TP. Without this
-      // cap, TRAIL_DIST (a flat $ floor meant for wider-SL instruments) could
-      // exceed this bot's entire TP distance on its tight scalp SLs — pushing
-      // the "BE" stop past the actual target and letting a breakeven-labeled
-      // close bank more profit than a real TP win. That's the bug behind BE
-      // trades showing bigger $ amounts than TP trades in the log.
-      const beDist = Math.min(
-        Math.max(CFG.TRAIL_DIST, totalMove * 0.15),
-        totalMove * 0.50
-      );
+      // BE lock now targets a small guaranteed profit instead of exact
+      // breakeven, per request: net profit (after this position's own
+      // commission — pos.lots × COMMISSION_PER_LOT, deterministic) lands
+      // between $0.30 and $0.50 if the BE stop gets hit. $ → price-distance
+      // conversion uses this position's real size, since $ = distance × units
+      // (see calcClosePnL). Still adaptive within that band (scales with
+      // totalMove like before) rather than a flat target, clamped so it
+      // never drops below $0.30 net or climbs past $0.50 net.
+      // NOTE: getExitSlippage() adds a small random adverse slip on top of
+      // this on the actual fill (modeled the same as a real broker would),
+      // so on an unusually fast move the realized net can land a few cents
+      // under $0.30 — that's fill slippage, not this SL sitting short.
+      const units = pos.posUnits || pos.lots * CONTRACT_SIZE || 1;
+      const commission = (pos.lots || 0) * CFG.COMMISSION_PER_LOT;
+      const minBeDist = (0.30 + commission) / units;
+      const maxBeDist = (0.50 + commission) / units;
+      const beDist = Math.min(Math.max(totalMove * 0.15, minBeDist), maxBeDist);
       newSL = isBuy ? pos.entry + beDist : pos.entry - beDist;
       phase = 1;
-      trailInfo = `BE LOCK @ ${P1}% — SL → ${newSL.toFixed(2)} (dist:${beDist.toFixed(1)}pts)`;
+      const netLock = beDist * units - commission;
+      trailInfo = `BE LOCK @ ${P1}% — SL → ${newSL.toFixed(2)} (locks ~$${netLock.toFixed(2)} net)`;
     }
   } else if(pctToTP < P1 && phase < 1) {
     // Reset debounce if price retreats below the threshold before lock activates
@@ -6780,6 +6794,14 @@ function openDrawer(name) {
   if(name==='positions') { authed ? updatePositionsUI([]) : updateDemoPositionsUI(); }
   if(name==='history')   renderLiveHistory();
   if(name==='backtest' && $('btRiskPct') && !$('btRiskPct').value) $('btRiskPct').value = CFG.RISK_PCT;
+  if(name==='setup' && $('gradeLegendLine')) {
+    // Pulled live from RefinedStrategy.config.quality, not hardcoded — stays
+    // correct automatically whenever plusScore/premiumScore/eliteScore change,
+    // instead of needing a matching text edit every time those get tuned.
+    const q = (typeof RefinedStrategy !== 'undefined') ? RefinedStrategy.config.quality : null;
+    const bPlus = q ? q.plusScore : 74, a = q ? q.premiumScore : 82, aPlus = q ? q.eliteScore : 92;
+    $('gradeLegendLine').textContent = `B+ ≥ ${bPlus}  ·  A ≥ ${a}  ·  A+ ≥ ${aPlus}`;
+  }
 }
 function closeDrawer() {
   if(activeDrawer) $(activeDrawer).classList.remove('open');
