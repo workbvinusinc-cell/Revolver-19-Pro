@@ -791,7 +791,7 @@ input[type=range]::-webkit-slider-thumb{
         <label>Leverage</label>
         <div class="field-row">
           <span style="font-size:11px;color:var(--text2)">1 :</span>
-          <input class="finput" type="number" id="cfgLeverage" placeholder="400" min="1" max="500" step="1"/>
+          <input class="finput" type="number" id="cfgLeverage" placeholder="400" min="1" max="2000" step="1"/>
         </div>
         <div class="field-hint">Account leverage for BTCUSD. Exness fixes BTCUSD margin at 0.25% (1:400) regardless of your account's forex leverage — controls required margin per trade.</div>
       </div>
@@ -828,9 +828,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="riskDisplay">1.0%</span>
-            <span class="range-bounds">0.1% — 5.0%</span>
+            <span class="range-bounds">0.1% — 25%</span>
           </div>
-          <input type="range" id="cfgRiskPct" min="0.1" max="5" step="0.1" value="1.0"/>
+          <input type="range" id="cfgRiskPct" min="0.1" max="25" step="0.1" value="1.0"/>
         </div>
         <div class="field-hint">% of balance staked per trade</div>
       </div>
@@ -850,11 +850,18 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="ddDisplay">5.0%</span>
-            <span class="range-bounds">1% — 20%</span>
+            <span class="range-bounds">1% — 75%</span>
           </div>
-          <input type="range" id="cfgMaxDD" min="1" max="20" step="0.5" value="5"/>
+          <input type="range" id="cfgMaxDD" min="1" max="75" step="0.5" value="5"/>
         </div>
-        <div class="field-hint">Bot stops automatically when this loss level is hit</div>
+        <div class="field-hint">Drawdown % tracked and shown live in the safety strip. Whether it actually pauses new entries is controlled by the toggle below — by default it does <strong style="color:var(--gold)">not</strong> stop the bot, it's tracking/reporting only.</div>
+      </div>
+      <div class="field">
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="cfgDDThrottleEnabled" style="accent-color:var(--gold);width:14px;height:14px;cursor:pointer"/>
+          <span style="font-size:10px;color:var(--text2)">Pause new entries when Max Daily Drawdown is breached</span>
+        </div>
+        <div class="field-hint">Off by default — the bot keeps trading through drawdown, same as a live Exness account would (Exness never halts your EA for you). Open positions always keep trailing/closing normally either way; this only ever affects whether new entries are allowed to open. Turn on if you want an automatic pause/resume circuit breaker instead.</div>
       </div>
     </div>
     <div class="settings-section">
@@ -863,7 +870,7 @@ input[type=range]::-webkit-slider-thumb{
         <label>Risk : Reward</label>
         <div class="field-row">
           <span style="font-size:11px;color:var(--text2)">1 :</span>
-          <input class="finput" type="number" id="cfgRR" placeholder="3.0" min="1" max="10" step="0.1"/>
+          <input class="finput" type="number" id="cfgRR" placeholder="3.0" min="1" max="20" step="0.1"/>
         </div>
         <div class="field-hint">Default 1:3 — TP distance = SL distance × RR</div>
       </div>
@@ -876,7 +883,7 @@ input[type=range]::-webkit-slider-thumb{
           </div>
           <div style="flex:1">
             <label style="font-size:8px">Max Lot Cap</label>
-            <input class="finput" type="number" id="cfgMaxLot" placeholder="10.00" min="0.01" max="100" step="0.01" style="padding:6px 8px"/>
+            <input class="finput" type="number" id="cfgMaxLot" placeholder="10.00" min="0.01" max="200" step="0.01" style="padding:6px 8px"/>
           </div>
         </div>
         <div class="field-hint">Floor and ceiling on position size — no single trade can be smaller than the min or exceed the max.</div>
@@ -884,7 +891,7 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>Max SL Distance</label>
         <div class="field-row">
-          <input class="finput" type="number" id="cfgMaxSL" placeholder="450" min="50" max="2000" step="10"/>
+          <input class="finput" type="number" id="cfgMaxSL" placeholder="450" min="50" max="5000" step="10"/>
           <span class="funit">$</span>
         </div>
         <div class="field-hint">Hard cap on SL distance in $. OB SL is trimmed to this value.</div>
@@ -892,7 +899,7 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>Max Spread Guard</label>
         <div class="field-row">
-          <input class="finput" type="number" id="cfgMaxSpread" placeholder="20" min="1" max="500" step="1"/>
+          <input class="finput" type="number" id="cfgMaxSpread" placeholder="20" min="1" max="1000" step="1"/>
           <span class="funit">$</span>
         </div>
         <div class="field-hint">Live spread above this $ amount is flagged/blocked before entry — protects against bad fills during illiquid or volatile conditions.</div>
@@ -904,6 +911,24 @@ input[type=range]::-webkit-slider-thumb{
           <span class="funit">$</span>
         </div>
         <div class="field-hint">Round-turn commission charged per lot on every close, on top of spread and slippage. Default $4 matches Exness BTCUSD Raw Spread ($2/side); use $8.75 for a Zero account. Set to 0 to disable.</div>
+      </div>
+      <div class="field">
+        <div style="display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="cfgSwapEnabled" style="accent-color:var(--gold);width:14px;height:14px;cursor:pointer"/>
+          <span style="font-size:10px;color:var(--text2)">Enable overnight swap charges</span>
+        </div>
+        <div class="field-hint">Live Exness BTCUSDm spec: -$15.48/lot/day long, $0 short, tripled on the Friday rollover. Only bites trades still open across a daily rollover (21:00 UTC). Uncheck to trade swap-free.</div>
+      </div>
+      <div class="field">
+        <label>Max Portfolio Heat (R multiples)</label>
+        <div class="range-wrap">
+          <div class="range-display">
+            <span class="range-val" id="portfolioHeatDisplay">2.0R</span>
+            <span class="range-bounds">0.5R — 10R</span>
+          </div>
+          <input type="range" id="cfgPortfolioHeat" min="0.5" max="10" step="0.1" value="2.0"/>
+        </div>
+        <div class="field-hint">Caps total open risk (in R multiples) across all concurrent BTCUSD positions — since they're highly correlated, this scales each new stacked trade's size multiplier down rather than rejecting it outright once the cap is hit.</div>
       </div>
       <div class="field">
         <label>Three-Phase Trailing Stop</label>
@@ -984,9 +1009,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="hardFloorDisplay">10%</span>
-            <span class="range-bounds">1% — 30%</span>
+            <span class="range-bounds">1% — 60%</span>
           </div>
-          <input type="range" id="cfgHardFloorPct" min="1" max="30" step="1" value="10"/>
+          <input type="range" id="cfgHardFloorPct" min="1" max="60" step="1" value="10"/>
         </div>
         <div class="field-hint">Bot stops trading when balance drops to this % of your starting balance. Lower = more aggressive. Higher = more conservative.</div>
       </div>
@@ -997,9 +1022,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="maxRiskCapDisplay">5.0%</span>
-            <span class="range-bounds">1% — 10%</span>
+            <span class="range-bounds">1% — 25%</span>
           </div>
-          <input type="range" id="cfgMaxRiskCapPct" min="1" max="10" step="0.5" value="5"/>
+          <input type="range" id="cfgMaxRiskCapPct" min="1" max="25" step="0.5" value="5"/>
         </div>
         <div class="field-hint">Absolute ceiling on risk % per trade. Your "Risk per Trade" setting above cannot exceed this hard cap.</div>
       </div>
@@ -1010,9 +1035,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="consecLossDisplay">3 losses</span>
-            <span class="range-bounds">1 — 10</span>
+            <span class="range-bounds">1 — 20</span>
           </div>
-          <input type="range" id="cfgConsecLossHalve" min="1" max="10" step="1" value="3"/>
+          <input type="range" id="cfgConsecLossHalve" min="1" max="20" step="1" value="3"/>
         </div>
         <div class="field-hint">After this many consecutive losses, risk is halved. Each additional loss halves again. A win resets the streak.</div>
       </div>
@@ -1023,9 +1048,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="emergFloorDisplay">15%</span>
-            <span class="range-bounds">5% — 30%</span>
+            <span class="range-bounds">5% — 60%</span>
           </div>
-          <input type="range" id="cfgEmergFloorPct" min="5" max="30" step="1" value="15"/>
+          <input type="range" id="cfgEmergFloorPct" min="5" max="60" step="1" value="15"/>
         </div>
         <div class="field-hint">Warning threshold: when balance is within this % above the hard floor, the safety band turns red.</div>
       </div>
@@ -1036,9 +1061,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="minMarginDisplay">50%</span>
-            <span class="range-bounds">10% — 90%</span>
+            <span class="range-bounds">5% — 95%</span>
           </div>
-          <input type="range" id="cfgMinMarginPct" min="10" max="90" step="5" value="50"/>
+          <input type="range" id="cfgMinMarginPct" min="5" max="95" step="5" value="50"/>
         </div>
         <div class="field-hint">% of free margin that must remain un-used. Higher = safer from margin calls. Lower = larger possible positions.</div>
       </div>
@@ -1049,9 +1074,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="maxConcurDisplay">2</span>
-            <span class="range-bounds">1 — 10</span>
+            <span class="range-bounds">1 — 20</span>
           </div>
-          <input type="range" id="cfgMaxConcurPos" min="1" max="10" step="1" value="2"/>
+          <input type="range" id="cfgMaxConcurPos" min="1" max="20" step="1" value="2"/>
         </div>
         <div class="field-hint">How many trades the bot can hold open at once. Higher allows more simultaneous exposure.</div>
       </div>
@@ -1269,21 +1294,24 @@ const CFG = {
   PROFIT_LOCK_ENABLED: true,
   SUBSEQUENT_LOCK_PCT: 70,   // % of each new target chunk locked away, from the 2nd hit of the day onward
   // ── DRAWDOWN CIRCUIT BREAKER ──
-  // MAX_DD_PCT used to be DISPLAY-ONLY (only fed the color-coded number in
-  // the safety strip UI) — preTradeSafetyCheck() always returned {ok:true}
-  // regardless of drawdown, so nothing ever actually paused trading no
-  // matter how deep the account fell. It's now enforced: once realized-
-  // equity drawdown from peak (balance + locked vault, no floating/
-  // unrealized PnL — same basis as liveMaxDD/replayMaxDD elsewhere) reaches
-  // MAX_DD_PCT, NEW entries pause (existing open positions are unaffected —
-  // they keep trailing/closing normally) until it recovers to 60% of that
-  // level, then resumes. Set DD_THROTTLE_ENABLED false to fall back to the
-  // old always-on behavior. Tune MAX_DD_PCT in Settings — 5% pauses often;
-  // raise it (e.g. 8-10%) if that's too tight for this strategy's normal
-  // equity swings, but keep it well under your overall drawdown ceiling
-  // since open positions can still add a bit more loss after the pause.
+  // MAX_DD_PCT/DD_THROTTLE_ENABLED are both fully user-configurable in
+  // Settings (Max Daily Drawdown slider + "Pause new entries..." toggle).
+  // Realized-equity drawdown from peak (balance + locked vault, no
+  // floating/unrealized PnL — same basis as liveMaxDD/replayMaxDD
+  // elsewhere) is always tracked and always shown live in the safety strip
+  // regardless of this toggle. DD_THROTTLE_ENABLED only controls whether
+  // that number is also allowed to pause NEW entries (existing open
+  // positions always keep trailing/closing normally either way — this
+  // never freezes management of a position already in the market).
+  // Defaults to OFF: a live Exness account has no such mechanism baked in
+  // — nothing on the broker side halts an EA for drawdown — so "off" is
+  // the more broker-realistic default, and the bot keeps trading through
+  // drawdown the way it would live unless you explicitly opt into the
+  // circuit-breaker behavior. Hysteresis (resume at 60% of the pause
+  // level) stops it flapping open/closed right at the threshold when
+  // enabled.
   MAX_DD_PCT   : 5.0,
-  DD_THROTTLE_ENABLED: true,
+  DD_THROTTLE_ENABLED: false,
   WIN_RATE_TGT : 55,
   DEMO_BALANCE : 0,
   MAX_LOT_CAP  : 10.0,         // your own risk cap — Exness's own BTCUSD ceiling is 200 lots/order
@@ -6818,12 +6846,15 @@ function loadSettings() {
     if(saved.RISK_PCT)      CFG.RISK_PCT      = saved.RISK_PCT;
     if(saved.WIN_RATE_TGT)  CFG.WIN_RATE_TGT  = saved.WIN_RATE_TGT;
     if(saved.MAX_DD_PCT)    CFG.MAX_DD_PCT    = saved.MAX_DD_PCT;
+    if(saved.DD_THROTTLE_ENABLED !== undefined) CFG.DD_THROTTLE_ENABLED = saved.DD_THROTTLE_ENABLED;
     if(saved.RR)            CFG.RR            = saved.RR;
     if(saved.MAX_LOT_CAP)   CFG.MAX_LOT_CAP   = saved.MAX_LOT_CAP;
     if(saved.MIN_LOT_SIZE)  CFG.MIN_LOT_SIZE  = saved.MIN_LOT_SIZE;
     if(saved.LEVERAGE)      CFG.LEVERAGE      = saved.LEVERAGE;
     if(saved.MAX_SPREAD_USD) CFG.MAX_SPREAD_USD = saved.MAX_SPREAD_USD;
     if(saved.COMMISSION_PER_LOT != null) CFG.COMMISSION_PER_LOT = saved.COMMISSION_PER_LOT;
+    if(saved.SWAP_ENABLED !== undefined) CFG.SWAP_ENABLED = saved.SWAP_ENABLED;
+    if(saved.MAX_PORTFOLIO_HEAT_R !== undefined) CFG.MAX_PORTFOLIO_HEAT_R = saved.MAX_PORTFOLIO_HEAT_R;
     if(saved.MAX_SL_PTS)    CFG.MAX_SL_PTS    = saved.MAX_SL_PTS;
     if(saved.TRAIL_ENABLED !== undefined) CFG.TRAIL_ENABLED = saved.TRAIL_ENABLED;
     if(saved.TRAIL_PHASE_1) CFG.TRAIL_PHASE_1 = saved.TRAIL_PHASE_1;
@@ -6845,12 +6876,16 @@ function loadSettings() {
   $('cfgRiskPct').value      = CFG.RISK_PCT;
   $('cfgWinRate').value      = CFG.WIN_RATE_TGT;
   $('cfgMaxDD').value        = CFG.MAX_DD_PCT;
+  $('cfgDDThrottleEnabled').checked = CFG.DD_THROTTLE_ENABLED === true;
   $('cfgRR').value           = CFG.RR;
   $('cfgMaxLot').value       = CFG.MAX_LOT_CAP;
   $('cfgMinLot').value       = CFG.MIN_LOT_SIZE;
   $('cfgLeverage').value     = CFG.LEVERAGE;
   $('cfgMaxSpread').value    = CFG.MAX_SPREAD_USD;
   $('cfgCommission').value   = CFG.COMMISSION_PER_LOT;
+  $('cfgSwapEnabled').checked = CFG.SWAP_ENABLED !== false;
+  $('cfgPortfolioHeat').value = CFG.MAX_PORTFOLIO_HEAT_R;
+  $('portfolioHeatDisplay').textContent = CFG.MAX_PORTFOLIO_HEAT_R.toFixed(1) + 'R';
   $('cfgMaxSL').value        = CFG.MAX_SL_PTS || '';
   $('cfgTrailEnabled').checked = CFG.TRAIL_ENABLED;
   $('cfgTrailPhase1').value  = CFG.TRAIL_PHASE_1 || '';
@@ -6884,6 +6919,7 @@ function saveSettings() {
   CFG.RISK_PCT      = parseFloat($('cfgRiskPct').value)  || 1.0;
   CFG.WIN_RATE_TGT  = parseInt($('cfgWinRate').value)    || 55;
   CFG.MAX_DD_PCT    = parseFloat($('cfgMaxDD').value)    || 5.0;
+  CFG.DD_THROTTLE_ENABLED = $('cfgDDThrottleEnabled').checked;
   CFG.RR            = parseFloat($('cfgRR').value)       || 3.0;
   CFG.MAX_LOT_CAP   = parseFloat($('cfgMaxLot').value)   || 10.0;
   CFG.MIN_LOT_SIZE  = parseFloat($('cfgMinLot').value)   || 0.01;
@@ -6891,6 +6927,8 @@ function saveSettings() {
   CFG.LEVERAGE      = Math.max(1, parseFloat($('cfgLeverage').value) || 400);
   CFG.MAX_SPREAD_USD = Math.max(1, parseFloat($('cfgMaxSpread').value) || 20);
   CFG.COMMISSION_PER_LOT = Math.max(0, parseFloat($('cfgCommission').value) ?? 4.0);
+  CFG.SWAP_ENABLED  = $('cfgSwapEnabled').checked;
+  CFG.MAX_PORTFOLIO_HEAT_R = Math.max(0, parseFloat($('cfgPortfolioHeat').value) || 2.0);
   CFG.MAX_SL_PTS    = parseFloat($('cfgMaxSL').value)    || 450.0;
   CFG.TRAIL_ENABLED = $('cfgTrailEnabled').checked;
   CFG.TRAIL_PHASE_1 = parseInt($('cfgTrailPhase1').value) || 50;
@@ -6911,8 +6949,11 @@ function saveSettings() {
       lockedProfit, profitLockHits, profitLockBaseline, profitLockDay,
       RISK_PCT: CFG.RISK_PCT, WIN_RATE_TGT: CFG.WIN_RATE_TGT,
       MAX_DD_PCT: CFG.MAX_DD_PCT, RR: CFG.RR, MAX_LOT_CAP: CFG.MAX_LOT_CAP,
+      DD_THROTTLE_ENABLED: CFG.DD_THROTTLE_ENABLED,
       MIN_LOT_SIZE: CFG.MIN_LOT_SIZE, LEVERAGE: CFG.LEVERAGE, MAX_SPREAD_USD: CFG.MAX_SPREAD_USD,
       COMMISSION_PER_LOT: CFG.COMMISSION_PER_LOT,
+      SWAP_ENABLED: CFG.SWAP_ENABLED,
+      MAX_PORTFOLIO_HEAT_R: CFG.MAX_PORTFOLIO_HEAT_R,
       MAX_SL_PTS: CFG.MAX_SL_PTS,
       TRAIL_ENABLED: CFG.TRAIL_ENABLED, TRAIL_PHASE_1: CFG.TRAIL_PHASE_1,
       TRAIL_PHASE_2: CFG.TRAIL_PHASE_2, TRAIL_PHASE_3: CFG.TRAIL_PHASE_3,
@@ -6991,6 +7032,7 @@ function updateDailyTargetBar() {
 $('cfgRiskPct').addEventListener('input', e=>{ $('riskDisplay').textContent = parseFloat(e.target.value).toFixed(1)+'%'; });
 $('cfgWinRate').addEventListener('input', e=>{ $('winRateDisplay').textContent = parseInt(e.target.value)+'%'; });
 $('cfgMaxDD').addEventListener('input', e=>{ $('ddDisplay').textContent = parseFloat(e.target.value).toFixed(1)+'%'; });
+$('cfgPortfolioHeat').addEventListener('input', e=>{ $('portfolioHeatDisplay').textContent = parseFloat(e.target.value).toFixed(1)+'R'; });
 $('cfgTrailEnabled').addEventListener('change', e=>{
   $('trailPhasesWrap').style.opacity = e.target.checked ? '1' : '0.35';
 });
