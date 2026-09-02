@@ -132,8 +132,6 @@ html,body{
   white-space:nowrap;
 }
 .stat-val.g{color:var(--green)}.stat-val.r{color:var(--red)}.stat-val.au{color:var(--gold)}
-@keyframes dd-flash-red{0%,100%{color:var(--red);opacity:1}50%{color:var(--text);opacity:.55}}
-.stat-val.dd-flash{animation:dd-flash-red 0.9s ease-in-out infinite}
 .last-trade-band{
   display:flex;align-items:center;gap:8px;
   height:26px;padding:0 12px;
@@ -702,7 +700,6 @@ input[type=range]::-webkit-slider-thumb{
         <strong>✅ BINANCE FEED ACTIVE</strong>
         Live BTC/USD bid/ask ticks stream free from Binance WebSocket (BTCUSDT).
         No API key required — click Connect to start.
-        <div id="gradeLegendLine" style="margin-top:8px;font-weight:600;letter-spacing:.02em">B+ ≥ — &nbsp;·&nbsp; A ≥ — &nbsp;·&nbsp; A+ ≥ —</div>
       </div>
       <button class="btn btn-auth" id="authBtn" style="margin-top:8px">Connect</button>
 
@@ -831,9 +828,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="riskDisplay">1.0%</span>
-            <span class="range-bounds">0.1% — 100.0%</span>
+            <span class="range-bounds">0.1% — 5.0%</span>
           </div>
-          <input type="range" id="cfgRiskPct" min="0.1" max="100" step="0.1" value="1.0"/>
+          <input type="range" id="cfgRiskPct" min="0.1" max="5" step="0.1" value="1.0"/>
         </div>
         <div class="field-hint">% of balance staked per trade</div>
       </div>
@@ -853,9 +850,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="ddDisplay">5.0%</span>
-            <span class="range-bounds">0.5% — 100%</span>
+            <span class="range-bounds">1% — 20%</span>
           </div>
-          <input type="range" id="cfgMaxDD" min="0.5" max="100" step="0.5" value="5"/>
+          <input type="range" id="cfgMaxDD" min="1" max="20" step="0.5" value="5"/>
         </div>
         <div class="field-hint">Bot stops automatically when this loss level is hit</div>
       </div>
@@ -898,7 +895,7 @@ input[type=range]::-webkit-slider-thumb{
           <input class="finput" type="number" id="cfgMaxSpread" placeholder="20" min="1" max="500" step="1"/>
           <span class="funit">$</span>
         </div>
-        <div class="field-hint">Live spread above this $ amount blocks the entry outright — matches a real broker refusing/re-quoting a fill when the market is too wide (illiquid sessions, news spikes, flash moves).</div>
+        <div class="field-hint">Live spread above this $ amount is flagged/blocked before entry — protects against bad fills during illiquid or volatile conditions.</div>
       </div>
       <div class="field">
         <label>Commission / Lot</label>
@@ -987,9 +984,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="hardFloorDisplay">10%</span>
-            <span class="range-bounds">1% — 99%</span>
+            <span class="range-bounds">1% — 30%</span>
           </div>
-          <input type="range" id="cfgHardFloorPct" min="1" max="99" step="1" value="10"/>
+          <input type="range" id="cfgHardFloorPct" min="1" max="30" step="1" value="10"/>
         </div>
         <div class="field-hint">Bot stops trading when balance drops to this % of your starting balance. Lower = more aggressive. Higher = more conservative.</div>
       </div>
@@ -1000,9 +997,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="maxRiskCapDisplay">5.0%</span>
-            <span class="range-bounds">0.5% — 100%</span>
+            <span class="range-bounds">1% — 10%</span>
           </div>
-          <input type="range" id="cfgMaxRiskCapPct" min="0.5" max="100" step="0.5" value="5"/>
+          <input type="range" id="cfgMaxRiskCapPct" min="1" max="10" step="0.5" value="5"/>
         </div>
         <div class="field-hint">Absolute ceiling on risk % per trade. Your "Risk per Trade" setting above cannot exceed this hard cap.</div>
       </div>
@@ -1013,9 +1010,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="consecLossDisplay">3 losses</span>
-            <span class="range-bounds">1 — 50</span>
+            <span class="range-bounds">1 — 10</span>
           </div>
-          <input type="range" id="cfgConsecLossHalve" min="1" max="50" step="1" value="3"/>
+          <input type="range" id="cfgConsecLossHalve" min="1" max="10" step="1" value="3"/>
         </div>
         <div class="field-hint">After this many consecutive losses, risk is halved. Each additional loss halves again. A win resets the streak.</div>
       </div>
@@ -1026,9 +1023,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="emergFloorDisplay">15%</span>
-            <span class="range-bounds">1% — 100%</span>
+            <span class="range-bounds">5% — 30%</span>
           </div>
-          <input type="range" id="cfgEmergFloorPct" min="1" max="100" step="1" value="15"/>
+          <input type="range" id="cfgEmergFloorPct" min="5" max="30" step="1" value="15"/>
         </div>
         <div class="field-hint">Warning threshold: when balance is within this % above the hard floor, the safety band turns red.</div>
       </div>
@@ -1039,9 +1036,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="minMarginDisplay">50%</span>
-            <span class="range-bounds">0% — 100%</span>
+            <span class="range-bounds">10% — 90%</span>
           </div>
-          <input type="range" id="cfgMinMarginPct" min="0" max="100" step="1" value="50"/>
+          <input type="range" id="cfgMinMarginPct" min="10" max="90" step="5" value="50"/>
         </div>
         <div class="field-hint">% of free margin that must remain un-used. Higher = safer from margin calls. Lower = larger possible positions.</div>
       </div>
@@ -1052,9 +1049,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="maxConcurDisplay">2</span>
-            <span class="range-bounds">1 — 50</span>
+            <span class="range-bounds">1 — 10</span>
           </div>
-          <input type="range" id="cfgMaxConcurPos" min="1" max="50" step="1" value="2"/>
+          <input type="range" id="cfgMaxConcurPos" min="1" max="10" step="1" value="2"/>
         </div>
         <div class="field-hint">How many trades the bot can hold open at once. Higher allows more simultaneous exposure.</div>
       </div>
@@ -1082,7 +1079,7 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>From</label>
         <div class="field-row">
-          <input class="finput" type="text" id="btDateFrom" placeholder="23-05-2026" maxlength="10" value="01-01-2020"/>
+          <input class="finput" type="text" id="btDateFrom" placeholder="23-05-2026" maxlength="10"/>
           <button class="nav-btn" onclick="setBtToday()" style="font-size:8px;padding:4px 8px">Last 7d</button>
         </div>
         <div class="field-hint">Start date — e.g. 23-05-2026 for a single day</div>
@@ -1090,7 +1087,7 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>To</label>
         <div class="field-row">
-          <input class="finput" type="text" id="btDateTo" placeholder="23-05-2026" maxlength="10" value="02-09-2026"/>
+          <input class="finput" type="text" id="btDateTo" placeholder="23-05-2026" maxlength="10"/>
         </div>
         <div class="field-hint">End date — same as From for single day backtest</div>
       </div>
@@ -1101,17 +1098,17 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>Starting Balance</label>
         <div class="field-row">
-          <input class="finput" type="number" id="btStartBal" placeholder="e.g. 1000" min="1" step="100" value="100"/>
+          <input class="finput" type="number" id="btStartBal" placeholder="e.g. 1000" min="1" step="100"/>
           <span class="funit">USD</span>
         </div>
       </div>
       <div class="field">
         <label>Risk per Trade</label>
         <div class="field-row">
-          <input class="finput" type="number" id="btRiskPct" placeholder="e.g. 1.0" min="0.1" max="100" step="0.1" value="2.5"/>
+          <input class="finput" type="number" id="btRiskPct" placeholder="e.g. 1.0" min="0.1" max="5" step="0.1"/>
           <span class="funit">%</span>
         </div>
-        <div class="field-hint">% of balance staked per trade (0.1–100, same cap as the Config screen's Max Risk hard cap) — also updates the live Risk per Trade setting</div>
+        <div class="field-hint">% of balance staked per trade (0.1–5.0, same cap as the Config screen) — also updates the live Risk per Trade setting</div>
       </div>
       <div class="field">
         <label>Profit Target</label>
@@ -1179,6 +1176,8 @@ input[type=range]::-webkit-slider-thumb{
     <option value="6.5">4×</option>
     <option value="13">20×</option>
     <option value="26">26× ⚡</option>
+    <option value="45">45× ⚡⚡</option>
+    <option value="80">80× ⚡⚡⚡</option>
   </select>
   <span id="rpStatus">— / —</span>
 </div>
@@ -1247,7 +1246,7 @@ let _binanceReconnectTimer = null;
 let _binanceOpenFailures   = 0;     // consecutive failed connect attempts on the current host — triggers failover
 
 const CFG = {
-  RISK_PCT     : 2.5,
+  RISK_PCT     : 1.0,
   // Lowered from 3.0 — a 3R target on 1-min BTCUSD breakouts is rarely reached
   // before price retraces into the stop, which is why SL hits dominated TP
   // hits even on decent setups. 1.8R is still a healthy reward:risk but sits
@@ -1289,13 +1288,10 @@ const CFG = {
   DEMO_BALANCE : 0,
   MAX_LOT_CAP  : 10.0,         // your own risk cap — Exness's own BTCUSD ceiling is 200 lots/order
   MIN_LOT_SIZE : 0.01,        // floor lot size — matches Exness's 0.01 lot minimum for BTCUSD
-  LEVERAGE     : 500,         // Set to 1:500 per request. NOTE: real Exness BTCUSD margin is fixed at
-                               // 0.25% (1:400) regardless of account leverage — this sim value controls
-                               // required margin per trade, so 1:500 here means slightly LOWER margin
-                               // usage than a real Exness BTCUSD fill would need at the same lot size.
+  LEVERAGE     : 400,         // Exness BTCUSD fixed margin requirement is 0.25% = 1:400 effective leverage
                                // (crypto leverage is fixed, independent of the account's forex leverage
                                // setting; Exness can drop this to 1:200/0.5% under High Margin Requirement)
-  MAX_SPREAD_USD: 20,         // ENFORCED — entries are blocked outright once live/dynamic spread exceeds this (tuned to Exness's Raw Spread BTCUSD range, see _executeDemoTrade / _openReplayPosition)
+  MAX_SPREAD_USD: 20,         // reference only — spread guard removed, trades no longer gated on this (tuned to Exness's tighter Raw Spread BTCUSD range)
   MAX_SL_PTS   : 450.0,       // Hard cap on SL distance in $ (rescaled for BTCUSD's price magnitude — tune to live ATR)
   MAX_CONCURRENT_POS: 5,      // was 3 (orig 2) — how many trades the bot can hold open at once
   // Portfolio-heat cap, in R multiples (1R = one trade's quality-multiplier-
@@ -1310,7 +1306,7 @@ const CFG = {
   TRAIL_PHASE_1: 60,          // % to TP for BE lock — raised from 50% to avoid premature BE on volatility
   TRAIL_PHASE_2: 80,          // % to TP for 40% trail
   TRAIL_PHASE_3: 93,          // % to TP for 60% runner trail
-  TRAIL_DIST   : 2.0,         // Min trail distance in $ for phase 2/3 ratchet floors. No longer used by the BE lock (Phase 1) — that now sets SL to the exact entry price, see updateThreePhaseTrail().
+  TRAIL_DIST   : 2.0,         // Min trail distance in $ — sized for this bot's tight scalp SLs (0.5–6 pts); also hard-capped at 50% of the move-to-TP in updateThreePhaseTrail() so BE can never lock in more than a TP win pays out
   // ── Blow-Proof Safety Layer Settings (user-configurable) ──
   SAFETY_HARD_FLOOR_PCT   : 10,   // % of start balance = hard floor
   SAFETY_MAX_RISK_CAP_PCT : 5,    // % hard cap on risk per trade
@@ -2170,17 +2166,23 @@ const REFINED_STRATEGY_CFG = {
     // grade assignment in evaluate() below, and the legacy star bridge in
     // refinedScoreToLegacyGrade(), both updated to drop the B tier).
     minimumScore: 53,
-    // Set to exact requested values.
-    plusScore: 74,        // B+ floor — the actual entry gate for trend-aligned setups
-    premiumScore: 82,    // A  floor — the entry gate for COUNTER-trend setups (and RANGE regime)
+    // Lowered per request 78 → 70 — loosens the volume lever back down
+    // (it's the gate the vast majority of trades pass through), trading
+    // some of the earlier selectivity for more trade frequency. Note this
+    // pulls the other direction from the RANGE-regime and target-distance
+    // gates added earlier in this session, which were raising the bar
+    // specifically to cut SL-prone setups — worth re-checking SL-hit rate
+    // and max DD after this change via tradeStatsBreakdown()/miniBacktest().
+    plusScore: 70,        // B+ floor — the actual entry gate for trend-aligned setups
+    premiumScore: 78,    // A  floor — the entry gate for COUNTER-trend setups (and RANGE regime)
     // FIX: max achievable score is exactly 100 (45 breakout + 25 trend + 15
     // regime + 15 room, zero wick penalty) — eliteScore sitting AT that
     // ceiling meant A+ required a mathematically perfect score and could
     // basically never fire. That silently killed the top RR tier in
     // gradeRRContinuous(), so even the best setups never got the longer
     // target/size treatment they earned. Lowered to a genuinely reachable
-    // but still top-tier bar. Set to exact requested value.
-    eliteScore: 92,      // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
+    // but still top-tier bar. Lowered further per request 92 → 88.
+    eliteScore: 88,      // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
                           // NOTE: 82 × 1.27 = 104.1, but scoreTotal is clamped to 0-100
                           // (see clamp(..., 0, 100) in evaluate()), so 104 would make A+
                           // mathematically unreachable — no setup could ever score that high.
@@ -5486,15 +5488,9 @@ function drawChart(overridePositions = null, overrideMid = null) {
     const pnlColor = inProfit ? '#448aff' : '#ef5350';
     const entryLabel = `${isBuy ? 'BUY' : 'SELL'} ${lotSz}L ${grade}${beLock} · ${pnlSign}$${Math.abs(livePnl).toFixed(2)}`;
     const slLoss = pos.beTriggered ? 0 : (pos.slAmount || Math.abs(pos.entry - pos.slPrice) * (pos.lots || 0.01) * 100 || 0);
-    // BE net: this SL now sits entry ± beDist (see updateThreePhaseTrail),
-    // not exactly at entry, so it's read straight off the real slPrice
-    // instead of a hardcoded "$0.00" that no longer reflects what a hit
-    // here actually pays out.
-    const units = pos.posUnits || (pos.lots || 0.01) * CONTRACT_SIZE || 1;
-    const beNet = (isBuy ? (pos.slPrice - pos.entry) : (pos.entry - pos.slPrice)) * units - (pos.lots || 0) * CFG.COMMISSION_PER_LOT;
     const slLineLabel = pos.trailActive
       ? `TRAIL · SL ${pos.slPrice.toFixed(2)}`
-      : pos.beTriggered ? `BE  ·  +$${Math.max(0, beNet).toFixed(2)}` : `SL  ·  -$${slLoss.toFixed(2)}`;
+      : pos.beTriggered ? `BE  ·  $0.00` : `SL  ·  -$${slLoss.toFixed(2)}`;
     const tpGain = pos.tpAmount || 0;
     const tpLineLabel = `TP  ·  +$${tpGain.toFixed(2)}`;
 
@@ -5777,17 +5773,6 @@ function flashPrice(dir) {
   setTimeout(()=>el.className='price-main', 400);
 }
 
-// Continuous red-flash warning on Balance & Equity whenever either is
-// below the session's starting balance — persists (no auto-dismiss, no
-// trading pause) until the account recovers back to/above that starting
-// balance. Used by both the live/demo stats strip and the backtest replay
-// stats strip, since both render into the same #stBal/#stEquity elements.
-function applyDDFlashWarning(balEl, eqEl, curBal, curEquity, startBal) {
-  const inDrawdown = startBal > 0 && (curBal < startBal || curEquity < startBal);
-  if (balEl) balEl.classList.toggle('dd-flash', inDrawdown);
-  if (eqEl) eqEl.classList.toggle('dd-flash', inDrawdown);
-}
-
 function updateStatsStrip() {
   const curBal = (authed && balance !== null) ? balance : demoBalance;
   const balEl = $('stBal');
@@ -5808,8 +5793,6 @@ function updateStatsStrip() {
     eqEl.textContent = '—'; eqEl.className = 'stat-val';
   }
   const totalMargin = demoPositions.reduce((s,p) => s + (p.margin||0), 0);
-  const curStart = (authed && balance !== null) ? (CFG.START_BALANCE || curBal) : demoStartBal;
-  applyDDFlashWarning(balEl, eqEl, curBal, equity, curStart);
   const marginEl = $('stMargin');
   if(totalMargin > 0) {
     marginEl.textContent = `$${totalMargin.toFixed(2)}`;
@@ -5871,22 +5854,22 @@ function preTradeSafetyCheck() {
     }
   }
 
-  // ── DRAWDOWN WARNING (report-only) — never blocks new entries. See
-  // CFG.MAX_DD_PCT comment for the full rationale. Hysteresis (resume at
-  // 60% of the pause level) stops it flapping open/closed right at the
-  // threshold. ddThrottleActive now only drives the red-flash UI warning
-  // (see updateSafetyUI / flashBalanceWarning) — trading is never paused.
+  // ── DRAWDOWN CIRCUIT BREAKER — the one check here that actually blocks
+  // new entries (everything above is report-only). See CFG.MAX_DD_PCT
+  // comment for the full rationale. Hysteresis (resume at 60% of the pause
+  // level) stops it flapping open/closed right at the threshold.
   if (CFG.DD_THROTTLE_ENABLED !== false && liveMaxBal > 0) {
     const equity = demoBalance + (lockedProfit || 0);
     const curDD  = ((liveMaxBal - equity) / liveMaxBal) * 100;
     const pauseAt = CFG.MAX_DD_PCT, resumeAt = CFG.MAX_DD_PCT * 0.6;
     if (!ddThrottleActive && curDD >= pauseAt) {
       ddThrottleActive = true;
-      addSignal('warn', `[DD WARNING] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% cap — trading continues, no entries are paused.`, null);
+      addSignal('warn', `[DD BREAKER] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% cap — new entries paused until it recovers to ${resumeAt.toFixed(1)}%. Open positions still managed normally.`, null);
     } else if (ddThrottleActive && curDD <= resumeAt) {
       ddThrottleActive = false;
-      addSignal('info', `[DD WARNING] Drawdown recovered to ${curDD.toFixed(1)}%.`, null);
+      addSignal('info', `[DD BREAKER] Drawdown recovered to ${curDD.toFixed(1)}% — new entries resumed.`, null);
     }
+    if (ddThrottleActive) return { ok:false, reason:'DD_THROTTLE' };
   }
 
   return { ok:true };
@@ -6144,9 +6127,9 @@ const newsEngine = {
     return null;
   },
 
-  spreadLimit() { return CFG.MAX_SPREAD_USD * 100; }, // display-only ($ -> pts) for the sbSpread status readout — actual entry-blocking enforcement lives in _executeDemoTrade / _openReplayPosition, not here
+  spreadLimit() { return CFG.MAX_SPREAD_USD * 100; }, // user-configurable ($ -> pts, always same limit — no news block
   liveSpreadPts() { if (!bid || !ask) return 0; return Math.round((ask - bid) * 100); },  // pts = diff × 100 for BTCUSD 2dp
-  spreadOk() { return this.liveSpreadPts() <= this.spreadLimit(); }, // used only for the sbSpread status dot color, not for gating trades
+  spreadOk() { return this.liveSpreadPts() <= this.spreadLimit(); },
 };
 
 // ── DEMO TRADE PLACEMENT ──
@@ -6197,14 +6180,6 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
   const isBuy = dir === 'UP';
   // ── LIVE SPREAD — real bid/ask from Binance + news overlay ──
   const dynSpread = getLiveSpread(newsEngine.state);
-  // ── EXNESS SPREAD GUARD — real brokers refuse to fill (or fill at a much
-  // worse price) once the spread blows out past what the account's risk
-  // model was sized for. Blocks the entry outright rather than letting it
-  // through at a worse price than the user configured for. ──
-  if (dynSpread > CFG.MAX_SPREAD_USD) {
-    addSignal('warn', `Entry blocked — spread $${dynSpread.toFixed(2)} exceeds Max Spread Guard $${CFG.MAX_SPREAD_USD.toFixed(2)}`, mid);
-    return;
-  }
   // ── SLIPPAGE — scaled by order-size regime (balance growth) and current
   // volatility, not a flat draw, so bigger/faster fills cost more, matching
   // the backtest path below (_openReplayPosition) exactly. ──
@@ -6398,27 +6373,20 @@ function updateThreePhaseTrail(pos, currentPrice) {
       pos._beLockTicks++;
     }
     if (pos._beLockTicks >= 2) {
-      // BE lock now targets a small guaranteed profit instead of exact
-      // breakeven, per request: net profit (after this position's own
-      // commission — pos.lots × COMMISSION_PER_LOT, deterministic) lands
-      // between $0.30 and $0.50 if the BE stop gets hit. $ → price-distance
-      // conversion uses this position's real size, since $ = distance × units
-      // (see calcClosePnL). Still adaptive within that band (scales with
-      // totalMove like before) rather than a flat target, clamped so it
-      // never drops below $0.30 net or climbs past $0.50 net.
-      // NOTE: getExitSlippage() adds a small random adverse slip on top of
-      // this on the actual fill (modeled the same as a real broker would),
-      // so on an unusually fast move the realized net can land a few cents
-      // under $0.30 — that's fill slippage, not this SL sitting short.
-      const units = pos.posUnits || pos.lots * CONTRACT_SIZE || 1;
-      const commission = (pos.lots || 0) * CFG.COMMISSION_PER_LOT;
-      const minBeDist = (0.30 + commission) / units;
-      const maxBeDist = (0.50 + commission) / units;
-      const beDist = Math.min(Math.max(totalMove * 0.15, minBeDist), maxBeDist);
+      // BE lock distance: proportional to total move (min 15%, floored by
+      // TRAIL_DIST) but ALWAYS capped at 50% of the move-to-TP. Without this
+      // cap, TRAIL_DIST (a flat $ floor meant for wider-SL instruments) could
+      // exceed this bot's entire TP distance on its tight scalp SLs — pushing
+      // the "BE" stop past the actual target and letting a breakeven-labeled
+      // close bank more profit than a real TP win. That's the bug behind BE
+      // trades showing bigger $ amounts than TP trades in the log.
+      const beDist = Math.min(
+        Math.max(CFG.TRAIL_DIST, totalMove * 0.15),
+        totalMove * 0.50
+      );
       newSL = isBuy ? pos.entry + beDist : pos.entry - beDist;
       phase = 1;
-      const netLock = beDist * units - commission;
-      trailInfo = `BE LOCK @ ${P1}% — SL → ${newSL.toFixed(2)} (locks ~$${netLock.toFixed(2)} net)`;
+      trailInfo = `BE LOCK @ ${P1}% — SL → ${newSL.toFixed(2)} (dist:${beDist.toFixed(1)}pts)`;
     }
   } else if(pctToTP < P1 && phase < 1) {
     // Reset debounce if price retreats below the threshold before lock activates
@@ -6820,14 +6788,6 @@ function openDrawer(name) {
   if(name==='positions') { authed ? updatePositionsUI([]) : updateDemoPositionsUI(); }
   if(name==='history')   renderLiveHistory();
   if(name==='backtest' && $('btRiskPct') && !$('btRiskPct').value) $('btRiskPct').value = CFG.RISK_PCT;
-  if(name==='setup' && $('gradeLegendLine')) {
-    // Pulled live from RefinedStrategy.config.quality, not hardcoded — stays
-    // correct automatically whenever plusScore/premiumScore/eliteScore change,
-    // instead of needing a matching text edit every time those get tuned.
-    const q = (typeof RefinedStrategy !== 'undefined') ? RefinedStrategy.config.quality : null;
-    const bPlus = q ? q.plusScore : 74, a = q ? q.premiumScore : 82, aPlus = q ? q.eliteScore : 92;
-    $('gradeLegendLine').textContent = `B+ ≥ ${bPlus}  ·  A ≥ ${a}  ·  A+ ≥ ${aPlus}`;
-  }
 }
 function closeDrawer() {
   if(activeDrawer) $(activeDrawer).classList.remove('open');
@@ -7181,14 +7141,7 @@ function checkRiskOverflow(slDist, quality, useBalance, opts) {
     const reqMargin = (lots * CONTRACT_SIZE * opts.useMid) / CFG.LEVERAGE;
     if (freeMgn > 0 && reqMargin > freeMgn * (SAFETY.MIN_MARGIN_PCT / 100)) {
       const maxLots = Math.floor(((freeMgn * (SAFETY.MIN_MARGIN_PCT / 100) * CFG.LEVERAGE) / (CONTRACT_SIZE * opts.useMid)) * 100) / 100;
-      // BUG FIX: this used to floor back up to MIN_LOT_SIZE even when
-      // maxLots was smaller — meaning a trade could open with LESS margin
-      // than a real broker (Exness) requires for its own minimum lot,
-      // instead of being rejected outright. Letting it clamp down to 0
-      // here lets the caller's own "adjLots < MIN_LOT_SIZE → insufficient
-      // free margin, no trade" check actually fire, matching how a real
-      // broker refuses the order rather than silently under-margining it.
-      lots = Math.max(0, Math.min(lots, +maxLots.toFixed(2)));
+      lots = Math.max(CFG.MIN_LOT_SIZE, Math.min(lots, +maxLots.toFixed(2)));
     }
   }
 
@@ -7656,15 +7609,28 @@ const replay = {
   // which is why "26×" (nominally ~7.7ms/candle) actually took ~1.5hr to
   // replay a year of M1 candles instead of the expected ~25min.
   // New engine: process candles in a tight loop for a real time-budget each
-  // animation frame (~30fps), then render ONCE per frame regardless of how
+  // animation frame callback, then render ONCE per batch regardless of how
   // many candles were processed in it. Budget scales with the selected
-  // speed so 26× uses nearly the whole frame for computation (maximum
-  // throughput this browser/device can sustain), while slower presets get
-  // proportionally smaller budgets — so the dropdown's ordering (1× ...
-  // 26×) is preserved, just recalibrated to actually hit "under 10 minutes
-  // for a year of data" at the top end.
-  FRAME_BUDGET_CAP_MS: 30,
-  MAX_CANDLES_PER_FRAME: 4000,   // safety valve only; time budget is what normally stops a batch
+  // speed (capped at FRAME_BUDGET_CAP_MS) so 80× uses the full per-callback
+  // budget (maximum throughput this browser/device can sustain), while
+  // slower presets get proportionally smaller budgets — so the dropdown's
+  // ordering (1× ... 80×) is preserved, just recalibrated to actually hit
+  // an 8yr fetch / 6.8yr replay-under-30min target at the top end. Actual
+  // wall-clock time still depends on the machine running it — this raises
+  // the ceiling, it doesn't guarantee a fixed number on every device.
+  // Raised from 30ms/4000 → 90ms/12000: the old 30ms cap saturated at
+  // speed≈25, meaning every dropdown step from 26× up to whatever ceiling
+  // did literally nothing — budgetMs = min(cap, speed*1.2) just kept
+  // returning 30. That was the actual throughput ceiling, not the speed
+  // number. Tripling the cap gives ~3× more compute per animation-frame
+  // callback (a rAF callback isn't vsync-capped — it just makes the next
+  // frame late, which is fine for a background batch job like this), which
+  // is what actually gets a ~2.5M-candle (6.8yr M1) replay under 30min
+  // instead of the old ceiling holding it near ~75-90min regardless of
+  // dropdown setting. MAX_CANDLES_PER_FRAME raised in proportion so the
+  // safety valve doesn't become the new bottleneck on faster machines.
+  FRAME_BUDGET_CAP_MS: 90,
+  MAX_CANDLES_PER_FRAME: 12000,   // safety valve only; time budget is what normally stops a batch
   // ── 1× REAL-TIME PACING ──
   // 1× is a literal wall-clock pace: 0.40 real seconds per candle, throttled
   // against performance.now() so you can actually watch each candle form —
@@ -7819,7 +7785,11 @@ const replay = {
   },
 
   setSpeed(multiplier) {
-    this.speed = Math.max(1, Math.min(26, multiplier));
+    // Ceiling raised 26 → 80 alongside FRAME_BUDGET_CAP_MS: budgetMs =
+    // min(90, speed*1.2) now saturates at speed≈75, so 80× is the first
+    // value that actually uses the full new frame budget rather than
+    // leaving headroom on the table.
+    this.speed = Math.max(1, Math.min(80, multiplier));
   },
 
   scrubTo(targetIndex) {
@@ -8022,9 +7992,7 @@ const replay = {
     }
 
     // ── STEP 2: Entry evaluation — tick-accurate, no future data ──────────
-    // Hard floor and DD warning are report-only (see _ddThrottleCheck /
-    // resetHardFloor) — they never pause new entries, even deep in drawdown.
-    if (!this.positions.length && !isNaN(this.replayBal)) {
+    if (!this.positions.length && !isNaN(this.replayBal) && this.replayBal > this.replayHardFloor && !this.replayDDThrottleActive) {
 
       // Price path: realistic intra-bar simulation.
       // Using known final H/L for PATH SHAPE is acceptable (those extremes did occur).
@@ -8158,11 +8126,10 @@ const replay = {
     if (shouldRender) this._renderFrame();
   },
 
-  // ── DRAWDOWN WARNING (backtest mirror of preTradeSafetyCheck) — report-only.
+  // ── DRAWDOWN CIRCUIT BREAKER (backtest mirror of preTradeSafetyCheck) ──
   // Same realized-equity basis (replayBal + vault, no floating PnL) as
   // replayMaxBal/replayMaxDD elsewhere, so this reads the identical number
-  // already shown in the results panel. It only flags the warning UI —
-  // entries are never paused, even deep in drawdown.
+  // already shown in the results panel — it just also acts on it now.
   _ddThrottleCheck() {
     if (CFG.DD_THROTTLE_ENABLED === false || !(this.replayMaxBal > 0)) return;
     const equity = this.replayBal + (this.replayVault || 0);
@@ -8170,10 +8137,10 @@ const replay = {
     const pauseAt = CFG.MAX_DD_PCT, resumeAt = CFG.MAX_DD_PCT * 0.6;
     if (!this.replayDDThrottleActive && curDD >= pauseAt) {
       this.replayDDThrottleActive = true;
-      addSignal('warn', `[BT DD WARNING] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% — trading continues, no entries are paused.`, null);
+      addSignal('warn', `[BT DD BREAKER] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% — new entries paused until recovery to ${resumeAt.toFixed(1)}%.`, null);
     } else if (this.replayDDThrottleActive && curDD <= resumeAt) {
       this.replayDDThrottleActive = false;
-      addSignal('info', `[BT DD WARNING] Drawdown recovered to ${curDD.toFixed(1)}%.`, null);
+      addSignal('info', `[BT DD BREAKER] Drawdown recovered to ${curDD.toFixed(1)}% — entries resumed.`, null);
     }
   },
 
@@ -8548,15 +8515,6 @@ const replay = {
     // ── Dynamic spread at fill time ──
     const dynSpread = getDynamicSpread(fillEpoch, ns.state);
 
-    // ── EXNESS SPREAD GUARD (backtest mirror of the live check in
-    // _executeDemoTrade) — blocks the entry outright once spread blows out
-    // past the configured max, matching what a real broker would do rather
-    // than filling at a worse price than the account was risk-sized for. ──
-    if (dynSpread > CFG.MAX_SPREAD_USD) {
-      addSignal('warn', `[BT] Entry blocked — spread $${dynSpread.toFixed(2)} exceeds Max Spread Guard $${CFG.MAX_SPREAD_USD.toFixed(2)}`, null);
-      return;
-    }
-
     // ── Slippage — scaled by order-size regime (balance growth, same proxy
     // used live) and current volatility, not a flat draw. This is what
     // actually keeps execution cost honest as the account compounds and
@@ -8727,7 +8685,6 @@ const replay = {
     $('stBal').textContent = `$${safeBal.toFixed(2)}`;
     $('stEquity').textContent = `$${safeEquity.toFixed(2)}`;
     $('stEquity').className = floating >= 0 ? 'stat-val g' : 'stat-val r';
-    applyDDFlashWarning($('stBal'), $('stEquity'), safeBal, safeEquity, this.replayStartBal);
     const totalTrades = this.replayWins + this.replayLosses;
     const wr = totalTrades > 0 ? (this.replayWins / totalTrades) * 100 : 0;
     $('stWinRate').textContent = totalTrades > 0 ? `${wr.toFixed(0)}%` : '—';
@@ -8957,14 +8914,8 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   const pageStarts = [];
   for (let s = startMs; s < endMs; s += pageSpanMs) pageStarts.push(s);
 
-  // Raised 2000 → 4200 (~3.8yrs → ~8yrs of M1 data) so a multi-year range
-  // (e.g. Jan 2020 - present) fetches in full instead of silently getting
-  // cut off partway through with no indication anything was dropped.
-  const MAX_PAGES = 4200; // ~4200 × 1000 M1 bars ≈ 8yrs — covers a full 2020-present range with headroom
-  if (pageStarts.length > MAX_PAGES) {
-    addSignal('warn', `BT range spans ${pageStarts.length} pages, above the ${MAX_PAGES}-page (~8yr) cap — truncating to the first ~8 years from your start date. Narrow the date range to fetch the rest.`, null);
-    pageStarts.length = MAX_PAGES;
-  }
+  const MAX_PAGES = 4400; // ~4400 × 1000 M1 bars ≈ 8.4yrs — headroom for an 8yr backtest fetch
+  if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
 
   const CONCURRENCY = 24; // parallel in-flight requests, split across both hosts below
   const results = new Array(pageStarts.length);
