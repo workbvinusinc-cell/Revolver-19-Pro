@@ -1080,7 +1080,7 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>From</label>
         <div class="field-row">
-          <input class="finput" type="text" id="btDateFrom" placeholder="23-05-2026" maxlength="10"/>
+          <input class="finput" type="text" id="btDateFrom" placeholder="23-05-2026" maxlength="10" value="01-01-2020"/>
           <button class="nav-btn" onclick="setBtToday()" style="font-size:8px;padding:4px 8px">Last 7d</button>
         </div>
         <div class="field-hint">Start date — e.g. 23-05-2026 for a single day</div>
@@ -1088,7 +1088,7 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>To</label>
         <div class="field-row">
-          <input class="finput" type="text" id="btDateTo" placeholder="23-05-2026" maxlength="10"/>
+          <input class="finput" type="text" id="btDateTo" placeholder="23-05-2026" maxlength="10" value="02-09-2026"/>
         </div>
         <div class="field-hint">End date — same as From for single day backtest</div>
       </div>
@@ -1099,14 +1099,14 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>Starting Balance</label>
         <div class="field-row">
-          <input class="finput" type="number" id="btStartBal" placeholder="e.g. 1000" min="1" step="100"/>
+          <input class="finput" type="number" id="btStartBal" placeholder="e.g. 1000" min="1" step="100" value="100"/>
           <span class="funit">USD</span>
         </div>
       </div>
       <div class="field">
         <label>Risk per Trade</label>
         <div class="field-row">
-          <input class="finput" type="number" id="btRiskPct" placeholder="e.g. 1.0" min="0.1" max="5" step="0.1"/>
+          <input class="finput" type="number" id="btRiskPct" placeholder="e.g. 1.0" min="0.1" max="5" step="0.1" value="2.5"/>
           <span class="funit">%</span>
         </div>
         <div class="field-hint">% of balance staked per trade (0.1–5.0, same cap as the Config screen) — also updates the live Risk per Trade setting</div>
@@ -1245,7 +1245,7 @@ let _binanceReconnectTimer = null;
 let _binanceOpenFailures   = 0;     // consecutive failed connect attempts on the current host — triggers failover
 
 const CFG = {
-  RISK_PCT     : 1.0,
+  RISK_PCT     : 2.5,
   // Lowered from 3.0 — a 3R target on 1-min BTCUSD breakouts is rarely reached
   // before price retraces into the stop, which is why SL hits dominated TP
   // hits even on decent setups. 1.8R is still a healthy reward:risk but sits
@@ -1287,7 +1287,10 @@ const CFG = {
   DEMO_BALANCE : 0,
   MAX_LOT_CAP  : 10.0,         // your own risk cap — Exness's own BTCUSD ceiling is 200 lots/order
   MIN_LOT_SIZE : 0.01,        // floor lot size — matches Exness's 0.01 lot minimum for BTCUSD
-  LEVERAGE     : 400,         // Exness BTCUSD fixed margin requirement is 0.25% = 1:400 effective leverage
+  LEVERAGE     : 500,         // Set to 1:500 per request. NOTE: real Exness BTCUSD margin is fixed at
+                               // 0.25% (1:400) regardless of account leverage — this sim value controls
+                               // required margin per trade, so 1:500 here means slightly LOWER margin
+                               // usage than a real Exness BTCUSD fill would need at the same lot size.
                                // (crypto leverage is fixed, independent of the account's forex leverage
                                // setting; Exness can drop this to 1:200/0.5% under High Margin Requirement)
   MAX_SPREAD_USD: 20,         // reference only — spread guard removed, trades no longer gated on this (tuned to Exness's tighter Raw Spread BTCUSD range)
@@ -8911,8 +8914,14 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   const pageStarts = [];
   for (let s = startMs; s < endMs; s += pageSpanMs) pageStarts.push(s);
 
-  const MAX_PAGES = 2000; // ~2000 × 1000 M1 bars ≈ 3.8yrs — plenty of headroom for a 1yr backtest
-  if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
+  // Raised 2000 → 4200 (~3.8yrs → ~8yrs of M1 data) so a multi-year range
+  // (e.g. Jan 2020 - present) fetches in full instead of silently getting
+  // cut off partway through with no indication anything was dropped.
+  const MAX_PAGES = 4200; // ~4200 × 1000 M1 bars ≈ 8yrs — covers a full 2020-present range with headroom
+  if (pageStarts.length > MAX_PAGES) {
+    addSignal('warn', `BT range spans ${pageStarts.length} pages, above the ${MAX_PAGES}-page (~8yr) cap — truncating to the first ~8 years from your start date. Narrow the date range to fetch the rest.`, null);
+    pageStarts.length = MAX_PAGES;
+  }
 
   const CONCURRENCY = 24; // parallel in-flight requests, split across both hosts below
   const results = new Array(pageStarts.length);
