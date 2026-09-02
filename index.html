@@ -1266,7 +1266,22 @@ const CFG = {
   // accumulated vault, which is never touched again once locked.
   PROFIT_LOCK_ENABLED: true,
   SUBSEQUENT_LOCK_PCT: 70,   // % of each new target chunk locked away, from the 2nd hit of the day onward
+  // ── DRAWDOWN CIRCUIT BREAKER ──
+  // MAX_DD_PCT used to be DISPLAY-ONLY (only fed the color-coded number in
+  // the safety strip UI) — preTradeSafetyCheck() always returned {ok:true}
+  // regardless of drawdown, so nothing ever actually paused trading no
+  // matter how deep the account fell. It's now enforced: once realized-
+  // equity drawdown from peak (balance + locked vault, no floating/
+  // unrealized PnL — same basis as liveMaxDD/replayMaxDD elsewhere) reaches
+  // MAX_DD_PCT, NEW entries pause (existing open positions are unaffected —
+  // they keep trailing/closing normally) until it recovers to 60% of that
+  // level, then resumes. Set DD_THROTTLE_ENABLED false to fall back to the
+  // old always-on behavior. Tune MAX_DD_PCT in Settings — 5% pauses often;
+  // raise it (e.g. 8-10%) if that's too tight for this strategy's normal
+  // equity swings, but keep it well under your overall drawdown ceiling
+  // since open positions can still add a bit more loss after the pause.
   MAX_DD_PCT   : 5.0,
+  DD_THROTTLE_ENABLED: true,
   WIN_RATE_TGT : 55,
   DEMO_BALANCE : 0,
   MAX_LOT_CAP  : 10.0,         // your own risk cap — Exness's own BTCUSD ceiling is 200 lots/order
@@ -1333,6 +1348,7 @@ let consecutiveLosses = 0;
 let consecutiveWins   = 0;
 let tradingLocked     = false;
 let riskHalved        = false;
+let ddThrottleActive  = false; // live/demo drawdown circuit breaker — see preTradeSafetyCheck()
 
 // (Survival Engine streak pause/lock removed on request — turned out to be
 // dead code anyway: survivalPauseUntil/survivalSessionLocked were declared
@@ -1943,7 +1959,16 @@ function detectMarketRegime() {
   if (!last) {
     result = 'UNKNOWN';
   } else {
-    const body = Math.abs(last.close - last.open);
+    // SMOOTHING FIX: EXPANSION used to key off a single completed M5 bar's
+    // body — one outlier candle could flip the whole regime read right as
+    // an entry evaluates, waving through a breakout that fires into what's
+    // actually still chop. Average the last 2 completed bars' bodies so a
+    // real expansion (both bars showing it) still passes, but a one-bar
+    // spike no longer does.
+    const prev = arr[arr.length - 3];
+    const body = prev
+      ? (Math.abs(last.close - last.open) + Math.abs(prev.close - prev.open)) / 2
+      : Math.abs(last.close - last.open);
     if (volatility < 0.5) {
       result = 'DEAD';
     } else if (body > volatility * 1.5) {
@@ -2050,10 +2075,11 @@ const REFINED_STRATEGY_CFG = {
     avoidNewsRelease: true,  // was false — re-enabled: the ±5min release window is where spread spikes and
                               // fake wicks live, the fastest way to turn a good setup into a near-miss loss
     roomLookbackBars: 25,    // window used to check for a nearby opposing swing extreme ahead of the trade
-    // Raised back up — 0.2 ATR of runway is almost nothing; it let the bot
-    // buy/sell right into a wall a bar or two away, which is a classic
-    // immediate-SL setup. 0.5 ATR gives the move somewhere to actually go.
-    minRoomATR: 0.5
+    // Raised again from 0.5 — same logic, taken further: the goal now is
+    // fewer SL hits/less drawdown, not maximum trade count, so entries need
+    // more confirmed runway before an opposing level before they're allowed
+    // to fire at all.
+    minRoomATR: 0.7
   },
 
   // ---------- Liquidity (kept for chart zone drawing / backtesting tools only — no longer gates entries) ----------
@@ -2138,14 +2164,17 @@ const REFINED_STRATEGY_CFG = {
     // grade assignment in evaluate() below, and the legacy star bridge in
     // refinedScoreToLegacyGrade(), both updated to drop the B tier).
     minimumScore: 53,
-    // Raised 70 → 78 — the trend-aligned gate is the volume lever (it's the
-    // gate the vast majority of trades pass through). Pushing it up trades
-    // trade count for selectivity — this plus the two changes below is the
-    // combined lever for cutting frequency while skewing what's cut toward
-    // the weaker setups specifically, not a random subsample.
-    plusScore: 78,        // B+ floor — the actual entry gate for trend-aligned setups
-    premiumScore: 83,    // A  floor — the entry gate for COUNTER-trend setups
-    eliteScore: 100,     // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
+    // Set to exact requested values.
+    plusScore: 74,        // B+ floor — the actual entry gate for trend-aligned setups
+    premiumScore: 82,    // A  floor — the entry gate for COUNTER-trend setups (and RANGE regime)
+    // FIX: max achievable score is exactly 100 (45 breakout + 25 trend + 15
+    // regime + 15 room, zero wick penalty) — eliteScore sitting AT that
+    // ceiling meant A+ required a mathematically perfect score and could
+    // basically never fire. That silently killed the top RR tier in
+    // gradeRRContinuous(), so even the best setups never got the longer
+    // target/size treatment they earned. Lowered to a genuinely reachable
+    // but still top-tier bar. Set to exact requested value.
+    eliteScore: 92,      // A+ floor — top tier, gets the longest RR via gradeRRContinuous()
                           // NOTE: 82 × 1.27 = 104.1, but scoreTotal is clamped to 0-100
                           // (see clamp(..., 0, 100) in evaluate()), so 104 would make A+
                           // mathematically unreachable — no setup could ever score that high.
@@ -2188,10 +2217,12 @@ const REFINED_STRATEGY_CFG = {
     // of that level doesn't immediately tag the stop. Was 0.05 (barely any
     // cushion) — raised to give the stop a little breathing room without
     // meaningfully widening risk.
-    // Widened from 0.20 — still small next to the wider lookbackBars-based
-    // stop above, but gives a plain wick-retest of the level a bit more
-    // room before it counts as invalidation.
-    slBufferATR: 0.35,
+    // Widened again from 0.35 — a stop sitting exactly at the structural
+    // level still gets clipped by an ordinary wick-retest that doesn't
+    // actually invalidate the setup. A bit more cushion trades a slightly
+    // worse average RR for meaningfully fewer noise-driven SL hits, which
+    // is the priority right now.
+    slBufferATR: 0.45,
 
     // BUG FIX — the root cause of the bot's low win rate: this was a flat
     // $6 cap on SL distance. That number makes sense for a much
@@ -3303,6 +3334,26 @@ const RefinedStrategy = (() => {
 
     const currentATR = atr(completed, 14) || barRange;
 
+    // ── LIVE CONFIRMATION — the breakout bar already closed by the time
+    // this fires, but nothing previously checked whether price has since
+    // snapped back into the range on the current (forming) candle. That's
+    // exactly the "breaks out, immediately reverts, tags SL" pattern that
+    // drives most SL hits on a single-candle trigger. Require the live
+    // price to still be beyond the broken level (with a small ATR cushion
+    // for normal noise) at the moment of entry — if it's already reverted,
+    // skip this tick; the trigger stays valid on the next tick if price
+    // holds, so a genuine breakout isn't lost, only a snapback is skipped.
+    const revertBuffer = currentATR * 0.10;
+    const reverted = isBuy
+      ? (Number.isFinite(price) && price < recentHigh - revertBuffer)
+      : (Number.isFinite(price) && price > recentLow + revertBuffer);
+    if (reverted) {
+      return {
+        signal: false, reason: "REVERTED_BEFORE_ENTRY", direction, trend, quality: null,
+        gates: { trigger: true, regimeOk: false, newsOk: false, roomOk: false, wickOk: false, quality: false }
+      };
+    }
+
     // ── Regime filter — skip only genuinely dead/no-volatility conditions,
     // where a "breakout" is really just spread/noise wiggling across a flat
     // range. EXPANSION/TREND/RANGE all still pass. ──
@@ -3351,6 +3402,35 @@ const RefinedStrategy = (() => {
       };
     }
 
+    // ── TARGET-DISTANCE CHECK — wires up C.trade.minTargetDistanceR, which
+    // was defined in config but never actually enforced anywhere. The room
+    // check just above only confirms minRoomATR (0.7 ATR by default) of
+    // clearance — far short of this trade's actual planned TP distance
+    // (SL can run up to maxSLATRMult×ATR, times rr, e.g. 3.0×1.8 = ~5.4x
+    // ATR to target). A setup can clear that small room gate while still
+    // having an opposing structural wall well short of TP — the trade
+    // stalls into it, gives back the move, and rolls into BE/SL instead of
+    // running to target. This re-derives the same SL distance
+    // calculateTradeGeometry() will use (structural level + ATR buffer,
+    // capped at maxSLATRMult) so the check is against the trade's REAL
+    // planned target, not a flat number. Skipped (auto-pass) when roomATR
+    // is Infinity — no opposing extreme in the lookback window means
+    // there's genuinely nothing in the way.
+    if (C.trade.minTargetDistanceR > 0 && Number.isFinite(roomATR)) {
+      const structuralRef = isBuy ? recentLow : recentHigh;
+      let approxSLDist = Math.abs(last.close - structuralRef) + currentATR * C.trade.slBufferATR;
+      approxSLDist = Math.min(approxSLDist, currentATR * C.trade.maxSLATRMult);
+      approxSLDist = Math.max(approxSLDist, C.trade.minSLPoints);
+      const approxTargetDist = approxSLDist * C.trade.rr;
+      const roomPrice = roomATR * currentATR;
+      if (roomPrice < approxTargetDist * C.trade.minTargetDistanceR) {
+        return {
+          signal: false, reason: "TARGET_OBSTRUCTED", direction, trend, quality: null,
+          gates: { trigger: true, regimeOk: true, newsOk: true, roomOk: true, wickOk: false, quality: false }
+        };
+      }
+    }
+
     // ── Dynamic quality score (0-100) — replaces the old flat 70. Feeds
     // calculatePositionSize()'s existing quality multiplier, so stronger
     // setups are sized up a bit and weak ones a bit down; both still trade.
@@ -3394,7 +3474,12 @@ const RefinedStrategy = (() => {
     // clearest "about to snap back" tells available pre-entry — worth a
     // hard cut, not just a point deduction, given the goal is fewer but
     // better trades. ──
-    if (oppWickRatio > 0.35) {
+    // Tightened from 0.35 — priority is fewer SL hits over raw trade count,
+    // and a smaller opposite-wick already indicates real-time rejection at
+    // the breakout extreme. Cutting the threshold catches more of these
+    // before they become immediate stop-outs, at the cost of some trade
+    // frequency.
+    if (oppWickRatio > 0.28) {
       return {
         signal: false,
         reason: "OPPOSING_WICK_REJECTION",
@@ -3422,13 +3507,22 @@ const RefinedStrategy = (() => {
     // Gate raised to B+ floor for ALL setups (was minimumScore/42 for
     // trend-aligned) — bot now only ever takes B+, A, or A+ grade trades.
     // Counter-trend still needs the higher premiumScore/A bar on top of that.
-    const requiredScore = counterTrend ? C.quality.premiumScore : C.quality.plusScore;
+    // RANGE regime now gets the same elevated bar as counter-trend. A
+    // momentum breakout inside a range-bound market is the textbook false-
+    // breakout setup — price is statistically more likely to snap back and
+    // test the other side of the range than to continue — so it has to
+    // prove itself with a meaningfully higher score than a breakout during
+    // EXPANSION/TREND conditions would need. Previously RANGE only cost a
+    // few regimeScore points (5 of 15) toward the same plusScore floor
+    // every other trend-aligned setup used.
+    const inRange = regime === "RANGE";
+    const requiredScore = (counterTrend || inRange) ? C.quality.premiumScore : C.quality.plusScore;
     const approved = scoreTotal >= requiredScore;
 
     if (!approved) {
       return {
         signal: false,
-        reason: counterTrend ? "AGAINST_TREND_LOW_GRADE" : "QUALITY_BELOW_THRESHOLD",
+        reason: counterTrend ? "AGAINST_TREND_LOW_GRADE" : inRange ? "RANGE_REGIME_LOW_GRADE" : "QUALITY_BELOW_THRESHOLD",
         direction,
         trend,
         quality: { total: scoreTotal, approved: false },
@@ -5751,6 +5845,25 @@ function preTradeSafetyCheck() {
       addSignal('warn',`[REPORT] EMERGENCY: only $${(bal-hardFloor).toFixed(2)} (${pctAboveFloor.toFixed(1)}%) above hard floor. Trading continues.`,null);
     }
   }
+
+  // ── DRAWDOWN CIRCUIT BREAKER — the one check here that actually blocks
+  // new entries (everything above is report-only). See CFG.MAX_DD_PCT
+  // comment for the full rationale. Hysteresis (resume at 60% of the pause
+  // level) stops it flapping open/closed right at the threshold.
+  if (CFG.DD_THROTTLE_ENABLED !== false && liveMaxBal > 0) {
+    const equity = demoBalance + (lockedProfit || 0);
+    const curDD  = ((liveMaxBal - equity) / liveMaxBal) * 100;
+    const pauseAt = CFG.MAX_DD_PCT, resumeAt = CFG.MAX_DD_PCT * 0.6;
+    if (!ddThrottleActive && curDD >= pauseAt) {
+      ddThrottleActive = true;
+      addSignal('warn', `[DD BREAKER] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% cap — new entries paused until it recovers to ${resumeAt.toFixed(1)}%. Open positions still managed normally.`, null);
+    } else if (ddThrottleActive && curDD <= resumeAt) {
+      ddThrottleActive = false;
+      addSignal('info', `[DD BREAKER] Drawdown recovered to ${curDD.toFixed(1)}% — new entries resumed.`, null);
+    }
+    if (ddThrottleActive) return { ok:false, reason:'DD_THROTTLE' };
+  }
+
   return { ok:true };
 }
 
@@ -6150,6 +6263,13 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
     slDist: +slDist.toFixed(2), slAmount: +slAmount.toFixed(2), tpAmount: +tpAmount.toFixed(2),
     quality, openTime: Date.now(), newsState: newsEngine.state,
     dynSpread: +dynSpread.toFixed(2), slip: +slip.toFixed(2),
+    // ── ANALYTICS FIELDS — tags each trade with the conditions it fired
+    // under, so tradeStatsBreakdown() can group win rate / SL-hit rate by
+    // grade, trend alignment, and regime instead of tuning thresholds blind.
+    gradeLetter: rawSetup && rawSetup.quality ? rawSetup.quality.grade : null,
+    trend: rawSetup ? rawSetup.trend : null,
+    counterTrend: rawSetup ? !!rawSetup.counterTrend : false,
+    regimeAtEntry: (typeof detectMarketRegime === 'function') ? detectMarketRegime() : null,
   };
   demoTradeLog.unshift(logEntry);
   updateLastTrade({...logEntry, entry:entryPrice});
@@ -7589,6 +7709,7 @@ const replay = {
       demoTradeLog: [...demoTradeLog],
     };
     this.positions = []; this.trades = [];
+    this._growthQueue = null; // growing-candle animation queue — see _processCandle STEP 3
     this.active = true; this.paused = false;
     this.replayBal = startBal; this.replayStartBal = startBal;
     this.replayHardFloor = startBal * SAFETY.HARD_FLOOR_PCT / 100;
@@ -7596,6 +7717,7 @@ const replay = {
     this.replayWins = 0; this.replayLosses = 0;
     this.replayConsecLoss = 0; this.replayConsecWin = 0;
     this.replayRiskHalved = false;
+    this.replayDDThrottleActive = false; // mirrors ddThrottleActive — see _ddThrottleCheck()
     this.replayLastBullSwp = -1; this.replayLastBearSwp = -1;
     this.replayLastBullEpoch = 0; this.replayLastBearEpoch = 0;
     this.replayLastBullPrice = 0; this.replayLastBearPrice = 0;
@@ -7695,7 +7817,15 @@ const replay = {
       const pctRT = ((this.index - 100) / (this.data.length - 100)) * 100;
       setBtProgress(Math.min(99, 40 + pctRT * 0.57),
         `Replaying… ${this.index.toLocaleString()} / ${this.data.length.toLocaleString()} · ${this.positions.length} open · ${this.trades.length} closed · ${this.speed}×`);
-      if (processed > 0 && this.index < this.data.length) {
+      // ── MQL5-STYLE GROWING CANDLE — reveal one queued OHLC snapshot of
+      // the current bar per animation frame (see _processCandle STEP 3)
+      // instead of jumping straight to the fully-closed bar. Takes priority
+      // over the "just finished a batch" render below so the reveal isn't
+      // skipped on the frame(s) right after a candle closes.
+      if (this._growthQueue && this._growthQueue.length) {
+        this._applyGrowthFrame(this._growthQueue.shift());
+        this._renderFrame();
+      } else if (processed > 0 && this.index < this.data.length) {
         this._renderFrame();
       }
       this._scheduleNext();
@@ -7791,6 +7921,7 @@ const replay = {
     candles[900] = completedM15;
     mid = current.open;  // start at bar open for trailing-stop high-water seed
     this._checkReplayPositions(current);
+    this._ddThrottleCheck();
 
     // ── DAILY PROFIT TARGET LOCK — resets every simulated calendar day ────
     // Mirrors live checkProfitLock() exactly (same lock-percent logic, same
@@ -7836,7 +7967,7 @@ const replay = {
     }
 
     // ── STEP 2: Entry evaluation — tick-accurate, no future data ──────────
-    if (!this.positions.length && !isNaN(this.replayBal) && this.replayBal > this.replayHardFloor) {
+    if (!this.positions.length && !isNaN(this.replayBal) && this.replayBal > this.replayHardFloor && !this.replayDDThrottleActive) {
 
       // Price path: realistic intra-bar simulation.
       // Using known final H/L for PATH SHAPE is acceptable (those extremes did occur).
@@ -7932,6 +8063,30 @@ const replay = {
     }
 
     // ── STEP 3: Finalize — bar is now closed; update state for rendering ──
+    // ── MQL5-STYLE GROWING CANDLE (visual only, real-time tier only) ──
+    // Build a short reveal sequence for the candle that just closed — same
+    // open→extreme→mid→extreme→close tick order the strategy evaluated it
+    // with above, so the animation matches what actually happened intrabar
+    // rather than an arbitrary shape. _tick()'s real-time branch pops one
+    // frame per animation frame over the ~24 idle frames between candles at
+    // 1x, so the current bar visibly forms instead of popping in complete —
+    // matching MQL5 Strategy Tester's visual mode. Skipped at batch speeds
+    // (2x+): dozens-to-thousands of candles can close within one rendered
+    // frame there, so there's no idle time to spend on it and, same as
+    // MQL5 itself at high speed, it wouldn't be visible anyway.
+    if (this.speed <= this.REALTIME_TIER_MAX) {
+      const gIsBull = current.close >= current.open;
+      const gPath = gIsBull
+        ? [current.open, current.low,  (current.high + current.low) / 2, current.high, current.close]
+        : [current.open, current.high, (current.high + current.low) / 2, current.low,  current.close];
+      let gh = current.open, gl = current.open;
+      this._growthQueue = gPath.map(p => {
+        gh = Math.max(gh, p); gl = Math.min(gl, p);
+        return { epoch: currentEpoch, open: current.open, high: gh, low: gl, close: p };
+      });
+    } else {
+      this._growthQueue = null;
+    }
     candles[60]  = this.data.slice(Math.max(0, this.index - 499), this.index + 1);
     while (this._m5DisplayCursor < this.m5Data.length && this.m5Data[this._m5DisplayCursor].epoch <= currentEpoch) {
       this._m5DisplayCursor++;
@@ -7944,6 +8099,24 @@ const replay = {
     mid = current.close;
 
     if (shouldRender) this._renderFrame();
+  },
+
+  // ── DRAWDOWN CIRCUIT BREAKER (backtest mirror of preTradeSafetyCheck) ──
+  // Same realized-equity basis (replayBal + vault, no floating PnL) as
+  // replayMaxBal/replayMaxDD elsewhere, so this reads the identical number
+  // already shown in the results panel — it just also acts on it now.
+  _ddThrottleCheck() {
+    if (CFG.DD_THROTTLE_ENABLED === false || !(this.replayMaxBal > 0)) return;
+    const equity = this.replayBal + (this.replayVault || 0);
+    const curDD  = ((this.replayMaxBal - equity) / this.replayMaxBal) * 100;
+    const pauseAt = CFG.MAX_DD_PCT, resumeAt = CFG.MAX_DD_PCT * 0.6;
+    if (!this.replayDDThrottleActive && curDD >= pauseAt) {
+      this.replayDDThrottleActive = true;
+      addSignal('warn', `[BT DD BREAKER] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% — new entries paused until recovery to ${resumeAt.toFixed(1)}%.`, null);
+    } else if (this.replayDDThrottleActive && curDD <= resumeAt) {
+      this.replayDDThrottleActive = false;
+      addSignal('info', `[BT DD BREAKER] Drawdown recovered to ${curDD.toFixed(1)}% — entries resumed.`, null);
+    }
   },
 
   _checkReplayPositions(candle) {
@@ -8458,6 +8631,20 @@ const replay = {
     chartOffset = 0;
     this._updateReplayStats();
     drawChart(this.positions, mid);
+  },
+
+  // ── Apply one partial-candle snapshot from _growthQueue to the chart's
+  // last slot, for the growing-candle animation. Reassigns the array slot
+  // to a NEW object rather than mutating the existing one in place — the
+  // slice in candles[60] shares object references with the underlying
+  // this.data array, so mutating in place would corrupt real historical
+  // data; reassigning the slot only repoints that one reference. ──
+  _applyGrowthFrame(frame) {
+    const arr = candles[60];
+    if (arr && arr.length) {
+      arr[arr.length - 1] = { epoch: frame.epoch, open: frame.open, high: frame.high, low: frame.low, close: frame.close };
+      mid = frame.close;
+    }
   },
 
   _updateReplayStats() {
@@ -9566,6 +9753,76 @@ function _scanGapPositions() {
   updateDemoPositionsUI();
   updateStatsStrip();
 }
+
+// ── TRADE STATS BREAKDOWN ──
+// Groups closed trades by grade, trend-alignment, and regime-at-entry so
+// threshold tuning (quality floors, minRoomATR, wick cutoff, etc.) can be
+// based on which conditions actually produce SL hits / drawdown instead of
+// guesswork. Also callable manually from the console as
+// window.tradeStatsBreakdown().
+function tradeStatsBreakdown() {
+  const closed = demoTradeLog.filter(t => t.status && t.status !== 'open' && t.pnl !== null);
+  if (!closed.length) {
+    addSignal('info', 'Stats breakdown: no closed trades yet', null);
+    return null;
+  }
+
+  function bucket(trades) {
+    const n = trades.length;
+    const w = trades.filter(t => t.pnl > 0).length;
+    const slHits = trades.filter(t => t.status === 'SL').length;
+    const totalPnl = trades.reduce((s, t) => s + t.pnl, 0);
+    return {
+      n,
+      winRate: n ? +((w / n) * 100).toFixed(1) : 0,
+      slHitRate: n ? +((slHits / n) * 100).toFixed(1) : 0,
+      avgPnl: n ? +(totalPnl / n).toFixed(2) : 0,
+      totalPnl: +totalPnl.toFixed(2)
+    };
+  }
+
+  const byGrade = {};
+  ['A+', 'A', 'B+'].forEach(g => {
+    const trades = closed.filter(t => t.gradeLetter === g);
+    if (trades.length) byGrade[g] = bucket(trades);
+  });
+
+  const byTrend = {
+    'WITH_TREND': bucket(closed.filter(t => t.trend && t.trend !== 'NONE' && !t.counterTrend)),
+    'COUNTER_TREND': bucket(closed.filter(t => t.counterTrend)),
+    'NO_TREND_READ': bucket(closed.filter(t => !t.trend || t.trend === 'NONE'))
+  };
+
+  const byRegime = {};
+  ['EXPANSION', 'TREND', 'RANGE', 'DEAD', 'UNKNOWN'].forEach(r => {
+    const trades = closed.filter(t => t.regimeAtEntry === r);
+    if (trades.length) byRegime[r] = bucket(trades);
+  });
+
+  const overall = bucket(closed);
+
+  const summary = { overall, byGrade, byTrend, byRegime };
+  console.log('Trade stats breakdown:', summary);
+
+  const gradeStr = Object.entries(byGrade).map(([g, s]) => `${g}:${s.winRate}%/${s.n}`).join(' ');
+  const trendStr = Object.entries(byTrend).filter(([,s]) => s.n).map(([t, s]) => `${t}:${s.winRate}%/${s.n}`).join(' ');
+  addSignal('info',
+    `Stats breakdown (${overall.n} closed) — win ${overall.winRate}% | SL-hit ${overall.slHitRate}% | grade[${gradeStr}] | trend[${trendStr}]`, null);
+
+  return summary;
+}
+window.tradeStatsBreakdown = tradeStatsBreakdown;
+
+// Auto-surface the breakdown every 10 newly closed trades so the data is
+// visible in the signal feed without needing to open the console.
+let _lastStatsBreakdownCount = 0;
+setInterval(() => {
+  const closedCount = demoTradeLog.filter(t => t.status && t.status !== 'open' && t.pnl !== null).length;
+  if (closedCount > 0 && closedCount !== _lastStatsBreakdownCount && closedCount % 10 === 0) {
+    _lastStatsBreakdownCount = closedCount;
+    tradeStatsBreakdown();
+  }
+}, 15000);
 
 // ── INIT ──
 window.addEventListener('resize', resizeCV);
