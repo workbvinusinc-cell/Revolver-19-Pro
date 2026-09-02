@@ -132,6 +132,8 @@ html,body{
   white-space:nowrap;
 }
 .stat-val.g{color:var(--green)}.stat-val.r{color:var(--red)}.stat-val.au{color:var(--gold)}
+@keyframes dd-flash-red{0%,100%{color:var(--red);opacity:1}50%{color:var(--text);opacity:.55}}
+.stat-val.dd-flash{animation:dd-flash-red 0.9s ease-in-out infinite}
 .last-trade-band{
   display:flex;align-items:center;gap:8px;
   height:26px;padding:0 12px;
@@ -829,9 +831,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="riskDisplay">1.0%</span>
-            <span class="range-bounds">0.1% — 5.0%</span>
+            <span class="range-bounds">0.1% — 100.0%</span>
           </div>
-          <input type="range" id="cfgRiskPct" min="0.1" max="5" step="0.1" value="1.0"/>
+          <input type="range" id="cfgRiskPct" min="0.1" max="100" step="0.1" value="1.0"/>
         </div>
         <div class="field-hint">% of balance staked per trade</div>
       </div>
@@ -851,9 +853,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="ddDisplay">5.0%</span>
-            <span class="range-bounds">1% — 20%</span>
+            <span class="range-bounds">0.5% — 100%</span>
           </div>
-          <input type="range" id="cfgMaxDD" min="1" max="20" step="0.5" value="5"/>
+          <input type="range" id="cfgMaxDD" min="0.5" max="100" step="0.5" value="5"/>
         </div>
         <div class="field-hint">Bot stops automatically when this loss level is hit</div>
       </div>
@@ -896,7 +898,7 @@ input[type=range]::-webkit-slider-thumb{
           <input class="finput" type="number" id="cfgMaxSpread" placeholder="20" min="1" max="500" step="1"/>
           <span class="funit">$</span>
         </div>
-        <div class="field-hint">Live spread above this $ amount is flagged/blocked before entry — protects against bad fills during illiquid or volatile conditions.</div>
+        <div class="field-hint">Live spread above this $ amount blocks the entry outright — matches a real broker refusing/re-quoting a fill when the market is too wide (illiquid sessions, news spikes, flash moves).</div>
       </div>
       <div class="field">
         <label>Commission / Lot</label>
@@ -985,9 +987,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="hardFloorDisplay">10%</span>
-            <span class="range-bounds">1% — 30%</span>
+            <span class="range-bounds">1% — 99%</span>
           </div>
-          <input type="range" id="cfgHardFloorPct" min="1" max="30" step="1" value="10"/>
+          <input type="range" id="cfgHardFloorPct" min="1" max="99" step="1" value="10"/>
         </div>
         <div class="field-hint">Bot stops trading when balance drops to this % of your starting balance. Lower = more aggressive. Higher = more conservative.</div>
       </div>
@@ -998,9 +1000,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="maxRiskCapDisplay">5.0%</span>
-            <span class="range-bounds">1% — 10%</span>
+            <span class="range-bounds">0.5% — 100%</span>
           </div>
-          <input type="range" id="cfgMaxRiskCapPct" min="1" max="10" step="0.5" value="5"/>
+          <input type="range" id="cfgMaxRiskCapPct" min="0.5" max="100" step="0.5" value="5"/>
         </div>
         <div class="field-hint">Absolute ceiling on risk % per trade. Your "Risk per Trade" setting above cannot exceed this hard cap.</div>
       </div>
@@ -1011,9 +1013,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="consecLossDisplay">3 losses</span>
-            <span class="range-bounds">1 — 10</span>
+            <span class="range-bounds">1 — 50</span>
           </div>
-          <input type="range" id="cfgConsecLossHalve" min="1" max="10" step="1" value="3"/>
+          <input type="range" id="cfgConsecLossHalve" min="1" max="50" step="1" value="3"/>
         </div>
         <div class="field-hint">After this many consecutive losses, risk is halved. Each additional loss halves again. A win resets the streak.</div>
       </div>
@@ -1024,9 +1026,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="emergFloorDisplay">15%</span>
-            <span class="range-bounds">5% — 30%</span>
+            <span class="range-bounds">1% — 100%</span>
           </div>
-          <input type="range" id="cfgEmergFloorPct" min="5" max="30" step="1" value="15"/>
+          <input type="range" id="cfgEmergFloorPct" min="1" max="100" step="1" value="15"/>
         </div>
         <div class="field-hint">Warning threshold: when balance is within this % above the hard floor, the safety band turns red.</div>
       </div>
@@ -1037,9 +1039,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="minMarginDisplay">50%</span>
-            <span class="range-bounds">10% — 90%</span>
+            <span class="range-bounds">0% — 100%</span>
           </div>
-          <input type="range" id="cfgMinMarginPct" min="10" max="90" step="5" value="50"/>
+          <input type="range" id="cfgMinMarginPct" min="0" max="100" step="1" value="50"/>
         </div>
         <div class="field-hint">% of free margin that must remain un-used. Higher = safer from margin calls. Lower = larger possible positions.</div>
       </div>
@@ -1050,9 +1052,9 @@ input[type=range]::-webkit-slider-thumb{
         <div class="range-wrap">
           <div class="range-display">
             <span class="range-val" id="maxConcurDisplay">2</span>
-            <span class="range-bounds">1 — 10</span>
+            <span class="range-bounds">1 — 50</span>
           </div>
-          <input type="range" id="cfgMaxConcurPos" min="1" max="10" step="1" value="2"/>
+          <input type="range" id="cfgMaxConcurPos" min="1" max="50" step="1" value="2"/>
         </div>
         <div class="field-hint">How many trades the bot can hold open at once. Higher allows more simultaneous exposure.</div>
       </div>
@@ -1106,10 +1108,10 @@ input[type=range]::-webkit-slider-thumb{
       <div class="field">
         <label>Risk per Trade</label>
         <div class="field-row">
-          <input class="finput" type="number" id="btRiskPct" placeholder="e.g. 1.0" min="0.1" max="5" step="0.1" value="2.5"/>
+          <input class="finput" type="number" id="btRiskPct" placeholder="e.g. 1.0" min="0.1" max="100" step="0.1" value="2.5"/>
           <span class="funit">%</span>
         </div>
-        <div class="field-hint">% of balance staked per trade (0.1–5.0, same cap as the Config screen) — also updates the live Risk per Trade setting</div>
+        <div class="field-hint">% of balance staked per trade (0.1–100, same cap as the Config screen's Max Risk hard cap) — also updates the live Risk per Trade setting</div>
       </div>
       <div class="field">
         <label>Profit Target</label>
@@ -1293,7 +1295,7 @@ const CFG = {
                                // usage than a real Exness BTCUSD fill would need at the same lot size.
                                // (crypto leverage is fixed, independent of the account's forex leverage
                                // setting; Exness can drop this to 1:200/0.5% under High Margin Requirement)
-  MAX_SPREAD_USD: 20,         // reference only — spread guard removed, trades no longer gated on this (tuned to Exness's tighter Raw Spread BTCUSD range)
+  MAX_SPREAD_USD: 20,         // ENFORCED — entries are blocked outright once live/dynamic spread exceeds this (tuned to Exness's Raw Spread BTCUSD range, see _executeDemoTrade / _openReplayPosition)
   MAX_SL_PTS   : 450.0,       // Hard cap on SL distance in $ (rescaled for BTCUSD's price magnitude — tune to live ATR)
   MAX_CONCURRENT_POS: 5,      // was 3 (orig 2) — how many trades the bot can hold open at once
   // Portfolio-heat cap, in R multiples (1R = one trade's quality-multiplier-
@@ -5775,6 +5777,17 @@ function flashPrice(dir) {
   setTimeout(()=>el.className='price-main', 400);
 }
 
+// Continuous red-flash warning on Balance & Equity whenever either is
+// below the session's starting balance — persists (no auto-dismiss, no
+// trading pause) until the account recovers back to/above that starting
+// balance. Used by both the live/demo stats strip and the backtest replay
+// stats strip, since both render into the same #stBal/#stEquity elements.
+function applyDDFlashWarning(balEl, eqEl, curBal, curEquity, startBal) {
+  const inDrawdown = startBal > 0 && (curBal < startBal || curEquity < startBal);
+  if (balEl) balEl.classList.toggle('dd-flash', inDrawdown);
+  if (eqEl) eqEl.classList.toggle('dd-flash', inDrawdown);
+}
+
 function updateStatsStrip() {
   const curBal = (authed && balance !== null) ? balance : demoBalance;
   const balEl = $('stBal');
@@ -5795,6 +5808,8 @@ function updateStatsStrip() {
     eqEl.textContent = '—'; eqEl.className = 'stat-val';
   }
   const totalMargin = demoPositions.reduce((s,p) => s + (p.margin||0), 0);
+  const curStart = (authed && balance !== null) ? (CFG.START_BALANCE || curBal) : demoStartBal;
+  applyDDFlashWarning(balEl, eqEl, curBal, equity, curStart);
   const marginEl = $('stMargin');
   if(totalMargin > 0) {
     marginEl.textContent = `$${totalMargin.toFixed(2)}`;
@@ -5856,22 +5871,22 @@ function preTradeSafetyCheck() {
     }
   }
 
-  // ── DRAWDOWN CIRCUIT BREAKER — the one check here that actually blocks
-  // new entries (everything above is report-only). See CFG.MAX_DD_PCT
-  // comment for the full rationale. Hysteresis (resume at 60% of the pause
-  // level) stops it flapping open/closed right at the threshold.
+  // ── DRAWDOWN WARNING (report-only) — never blocks new entries. See
+  // CFG.MAX_DD_PCT comment for the full rationale. Hysteresis (resume at
+  // 60% of the pause level) stops it flapping open/closed right at the
+  // threshold. ddThrottleActive now only drives the red-flash UI warning
+  // (see updateSafetyUI / flashBalanceWarning) — trading is never paused.
   if (CFG.DD_THROTTLE_ENABLED !== false && liveMaxBal > 0) {
     const equity = demoBalance + (lockedProfit || 0);
     const curDD  = ((liveMaxBal - equity) / liveMaxBal) * 100;
     const pauseAt = CFG.MAX_DD_PCT, resumeAt = CFG.MAX_DD_PCT * 0.6;
     if (!ddThrottleActive && curDD >= pauseAt) {
       ddThrottleActive = true;
-      addSignal('warn', `[DD BREAKER] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% cap — new entries paused until it recovers to ${resumeAt.toFixed(1)}%. Open positions still managed normally.`, null);
+      addSignal('warn', `[DD WARNING] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% cap — trading continues, no entries are paused.`, null);
     } else if (ddThrottleActive && curDD <= resumeAt) {
       ddThrottleActive = false;
-      addSignal('info', `[DD BREAKER] Drawdown recovered to ${curDD.toFixed(1)}% — new entries resumed.`, null);
+      addSignal('info', `[DD WARNING] Drawdown recovered to ${curDD.toFixed(1)}%.`, null);
     }
-    if (ddThrottleActive) return { ok:false, reason:'DD_THROTTLE' };
   }
 
   return { ok:true };
@@ -6129,9 +6144,9 @@ const newsEngine = {
     return null;
   },
 
-  spreadLimit() { return CFG.MAX_SPREAD_USD * 100; }, // user-configurable ($ -> pts, always same limit — no news block
+  spreadLimit() { return CFG.MAX_SPREAD_USD * 100; }, // display-only ($ -> pts) for the sbSpread status readout — actual entry-blocking enforcement lives in _executeDemoTrade / _openReplayPosition, not here
   liveSpreadPts() { if (!bid || !ask) return 0; return Math.round((ask - bid) * 100); },  // pts = diff × 100 for BTCUSD 2dp
-  spreadOk() { return this.liveSpreadPts() <= this.spreadLimit(); },
+  spreadOk() { return this.liveSpreadPts() <= this.spreadLimit(); }, // used only for the sbSpread status dot color, not for gating trades
 };
 
 // ── DEMO TRADE PLACEMENT ──
@@ -6182,6 +6197,14 @@ function _executeDemoTrade(dir, ob, quality = 1, rawSetup = null, qualityScore =
   const isBuy = dir === 'UP';
   // ── LIVE SPREAD — real bid/ask from Binance + news overlay ──
   const dynSpread = getLiveSpread(newsEngine.state);
+  // ── EXNESS SPREAD GUARD — real brokers refuse to fill (or fill at a much
+  // worse price) once the spread blows out past what the account's risk
+  // model was sized for. Blocks the entry outright rather than letting it
+  // through at a worse price than the user configured for. ──
+  if (dynSpread > CFG.MAX_SPREAD_USD) {
+    addSignal('warn', `Entry blocked — spread $${dynSpread.toFixed(2)} exceeds Max Spread Guard $${CFG.MAX_SPREAD_USD.toFixed(2)}`, mid);
+    return;
+  }
   // ── SLIPPAGE — scaled by order-size regime (balance growth) and current
   // volatility, not a flat draw, so bigger/faster fills cost more, matching
   // the backtest path below (_openReplayPosition) exactly. ──
@@ -7158,7 +7181,14 @@ function checkRiskOverflow(slDist, quality, useBalance, opts) {
     const reqMargin = (lots * CONTRACT_SIZE * opts.useMid) / CFG.LEVERAGE;
     if (freeMgn > 0 && reqMargin > freeMgn * (SAFETY.MIN_MARGIN_PCT / 100)) {
       const maxLots = Math.floor(((freeMgn * (SAFETY.MIN_MARGIN_PCT / 100) * CFG.LEVERAGE) / (CONTRACT_SIZE * opts.useMid)) * 100) / 100;
-      lots = Math.max(CFG.MIN_LOT_SIZE, Math.min(lots, +maxLots.toFixed(2)));
+      // BUG FIX: this used to floor back up to MIN_LOT_SIZE even when
+      // maxLots was smaller — meaning a trade could open with LESS margin
+      // than a real broker (Exness) requires for its own minimum lot,
+      // instead of being rejected outright. Letting it clamp down to 0
+      // here lets the caller's own "adjLots < MIN_LOT_SIZE → insufficient
+      // free margin, no trade" check actually fire, matching how a real
+      // broker refuses the order rather than silently under-margining it.
+      lots = Math.max(0, Math.min(lots, +maxLots.toFixed(2)));
     }
   }
 
@@ -7992,7 +8022,9 @@ const replay = {
     }
 
     // ── STEP 2: Entry evaluation — tick-accurate, no future data ──────────
-    if (!this.positions.length && !isNaN(this.replayBal) && this.replayBal > this.replayHardFloor && !this.replayDDThrottleActive) {
+    // Hard floor and DD warning are report-only (see _ddThrottleCheck /
+    // resetHardFloor) — they never pause new entries, even deep in drawdown.
+    if (!this.positions.length && !isNaN(this.replayBal)) {
 
       // Price path: realistic intra-bar simulation.
       // Using known final H/L for PATH SHAPE is acceptable (those extremes did occur).
@@ -8126,10 +8158,11 @@ const replay = {
     if (shouldRender) this._renderFrame();
   },
 
-  // ── DRAWDOWN CIRCUIT BREAKER (backtest mirror of preTradeSafetyCheck) ──
+  // ── DRAWDOWN WARNING (backtest mirror of preTradeSafetyCheck) — report-only.
   // Same realized-equity basis (replayBal + vault, no floating PnL) as
   // replayMaxBal/replayMaxDD elsewhere, so this reads the identical number
-  // already shown in the results panel — it just also acts on it now.
+  // already shown in the results panel. It only flags the warning UI —
+  // entries are never paused, even deep in drawdown.
   _ddThrottleCheck() {
     if (CFG.DD_THROTTLE_ENABLED === false || !(this.replayMaxBal > 0)) return;
     const equity = this.replayBal + (this.replayVault || 0);
@@ -8137,10 +8170,10 @@ const replay = {
     const pauseAt = CFG.MAX_DD_PCT, resumeAt = CFG.MAX_DD_PCT * 0.6;
     if (!this.replayDDThrottleActive && curDD >= pauseAt) {
       this.replayDDThrottleActive = true;
-      addSignal('warn', `[BT DD BREAKER] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% — new entries paused until recovery to ${resumeAt.toFixed(1)}%.`, null);
+      addSignal('warn', `[BT DD WARNING] Realized drawdown ${curDD.toFixed(1)}% ≥ ${pauseAt.toFixed(1)}% — trading continues, no entries are paused.`, null);
     } else if (this.replayDDThrottleActive && curDD <= resumeAt) {
       this.replayDDThrottleActive = false;
-      addSignal('info', `[BT DD BREAKER] Drawdown recovered to ${curDD.toFixed(1)}% — entries resumed.`, null);
+      addSignal('info', `[BT DD WARNING] Drawdown recovered to ${curDD.toFixed(1)}%.`, null);
     }
   },
 
@@ -8515,6 +8548,15 @@ const replay = {
     // ── Dynamic spread at fill time ──
     const dynSpread = getDynamicSpread(fillEpoch, ns.state);
 
+    // ── EXNESS SPREAD GUARD (backtest mirror of the live check in
+    // _executeDemoTrade) — blocks the entry outright once spread blows out
+    // past the configured max, matching what a real broker would do rather
+    // than filling at a worse price than the account was risk-sized for. ──
+    if (dynSpread > CFG.MAX_SPREAD_USD) {
+      addSignal('warn', `[BT] Entry blocked — spread $${dynSpread.toFixed(2)} exceeds Max Spread Guard $${CFG.MAX_SPREAD_USD.toFixed(2)}`, null);
+      return;
+    }
+
     // ── Slippage — scaled by order-size regime (balance growth, same proxy
     // used live) and current volatility, not a flat draw. This is what
     // actually keeps execution cost honest as the account compounds and
@@ -8685,6 +8727,7 @@ const replay = {
     $('stBal').textContent = `$${safeBal.toFixed(2)}`;
     $('stEquity').textContent = `$${safeEquity.toFixed(2)}`;
     $('stEquity').className = floating >= 0 ? 'stat-val g' : 'stat-val r';
+    applyDDFlashWarning($('stBal'), $('stEquity'), safeBal, safeEquity, this.replayStartBal);
     const totalTrades = this.replayWins + this.replayLosses;
     const wr = totalTrades > 0 ? (this.replayWins / totalTrades) * 100 : 0;
     $('stWinRate').textContent = totalTrades > 0 ? `${wr.toFixed(0)}%` : '—';
