@@ -8917,14 +8917,14 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
   const MAX_PAGES = 4400; // ~4400 × 1000 M1 bars ≈ 8.4yrs — headroom for an 8yr backtest fetch
   if (pageStarts.length > MAX_PAGES) pageStarts.length = MAX_PAGES;
 
-  const CONCURRENCY = 24; // parallel in-flight requests, split across both hosts below
+  const CONCURRENCY = 24; // parallel in-flight requests, split across healthy hosts below
   const results = new Array(pageStarts.length);
   let completedPages = 0;
   btFetching = true;
 
   // Fetch one page. Uses fetch() with a manual timeout so a stalled request
-  // doesn't hang the pool indefinitely. hostIdx round-robins across
-  // BINANCE_HOSTS so the 24-wide pool isn't all hammering one origin.
+  // doesn't hang the pool indefinitely. hostIdx selects which BINANCE_HOSTS
+  // entry to hit.
   const fetchPage = (pageStartMs, hostIdx) => new Promise((resolve, reject) => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -8955,19 +8955,69 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
           epoch: Math.floor(c[0] / 1000), open: +c[1], high: +c[2], low: +c[3], close: +c[4]
         })));
       })
-      .catch(e => { clearTimeout(timer); reject(e); });
+      .catch(e => {
+        clearTimeout(timer);
+        // A "handshake failed" / TypeError-from-fetch is a network-level
+        // block (geo-block, DNS, TLS refusal) — not a transient blip — so
+        // tag it distinctly from an HTTP-level error (which carries a real
+        // status code and reached the server fine).
+        e.isNetworkLevel = !(e instanceof Error && /^HTTP \d/.test(e.message)) && e.name !== 'AbortError';
+        reject(e);
+      });
   });
+
+  // ── PREFLIGHT HOST HEALTH CHECK ──
+  // Binance.com refuses the socket handshake outright for geo-blocked IPs
+  // (see BINANCE_HOSTS comment above) — that's not a rate limit or a blip,
+  // it will fail identically on every single page for the rest of the run.
+  // The old code round-robined pages across BOTH hosts unconditionally, so
+  // a geo-blocked user silently lost ~half their pages (each one burning 3
+  // failed retries against a host that was never going to answer) — that's
+  // the "binance.com handshake failed every time" bug: it wasn't erroring
+  // once, it was erroring on every page assigned to that host, forever.
+  // Fix: probe both hosts with a 1-bar request before starting the real
+  // fetch, and only ever route pages to hosts that actually answered.
+  const probeHost = async (hostIdx) => {
+    try {
+      await fetchPage(startMs, hostIdx);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+  const hostChecks = await Promise.all(BINANCE_HOSTS.map((_, i) => probeHost(i)));
+  let healthyHosts = hostChecks.map((ok, i) => ok ? i : -1).filter(i => i >= 0);
+  if (healthyHosts.length === 0) {
+    // Every host failed the probe — almost certainly a local network/VPN/
+    // firewall issue rather than a per-host geo-block (both Binance.com AND
+    // Binance.US failing is very unlikely to be a coincidence). Don't burn
+    // thousands of doomed requests finding this out the slow way.
+    addSignal('warn', 'BT fetch: could not reach Binance (all hosts failed handshake). Check your network connection or VPN, then try again.', null);
+    btFetching = false;
+    return [];
+  }
+  if (healthyHosts.length < BINANCE_HOSTS.length) {
+    const downLabels = BINANCE_HOSTS.filter((_, i) => !healthyHosts.includes(i)).map(h => h.label).join(', ');
+    addSignal('info', `BT fetch: ${downLabels} unreachable (likely geo-blocked) — routing all pages through ${BINANCE_HOSTS[healthyHosts[0]].label} instead.`, null);
+  }
 
   // Retry a single page up to 3 times so a transient connection drop or rate
   // limit doesn't abort the whole fetch — but doesn't block any other
   // in-flight page while it retries. A 429 honors Binance's own Retry-After
-  // header; any other error falls back to a short exponential back-off.
-  const fetchWithRetry = async (pageStartMs, pageIdx, hostIdx) => {
+  // header; any other error falls back to a short exponential back-off. If
+  // an attempt fails for network-level reasons (not just a transient HTTP
+  // error) and another healthy host is available, the next attempt fails
+  // over to it instead of retrying the same dead host a second time.
+  const fetchWithRetry = async (pageStartMs, pageIdx, preferredHostIdx) => {
+    let hostIdx = preferredHostIdx;
     for (let attempt = 1; attempt <= 3; attempt++) {
       if (btCancelled) return [];
       try {
         return await fetchPage(pageStartMs, hostIdx);
       } catch (e) {
+        if (e.isNetworkLevel && healthyHosts.length > 1) {
+          hostIdx = healthyHosts[(healthyHosts.indexOf(hostIdx) + 1) % healthyHosts.length];
+        }
         if (attempt === 3) {
           addSignal('warn', `BT fetch error (page ${pageIdx + 1}/${pageStarts.length}): ${e.message}`, null);
           return [];
@@ -8980,9 +9030,10 @@ async function fetchBtCandles(granularity, startEpoch, endEpoch, onProgress) {
 
   let nextPage = 0;
   async function worker(workerIdx) {
+    const hostIdx = healthyHosts[workerIdx % healthyHosts.length];
     while (nextPage < pageStarts.length && !btCancelled) {
       const pageIdx = nextPage++;
-      results[pageIdx] = await fetchWithRetry(pageStarts[pageIdx], pageIdx, workerIdx);
+      results[pageIdx] = await fetchWithRetry(pageStarts[pageIdx], pageIdx, hostIdx);
       completedPages++;
       if (onProgress) onProgress(completedPages, pageStarts.length);
     }
